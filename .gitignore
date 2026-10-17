@@ -5,3 +5,6 @@ __pycache__/
 models/*.task
 *.mp4
 *.jsonl
+models/*.tflite
+models/*.pt
+*.pt

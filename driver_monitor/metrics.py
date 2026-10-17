@@ -1,7 +1,8 @@
 """Geometric signals computed from MediaPipe face landmarks.
 
 All functions take an (N, 2) or (N, 3) array of landmark coordinates in pixel
-space and return plain floats, so they are easy to unit test without a camera.
+space (z scaled like x) and return plain floats, so they are easy to unit test
+without a camera.
 """
 
 from __future__ import annotations
@@ -15,9 +16,17 @@ import numpy as np
 RIGHT_EYE = (33, 160, 158, 133, 153, 144)
 LEFT_EYE = (362, 385, 387, 263, 373, 380)
 
+# Eye corners ordered image-left -> image-right, and iris centres (refined mesh).
+RIGHT_EYE_CORNERS = (33, 133)
+LEFT_EYE_CORNERS = (362, 263)
+RIGHT_IRIS, LEFT_IRIS = 468, 473
+
 # Mouth: two corners, then three upper/lower pairs across the inner lips.
 MOUTH_CORNERS = (61, 291)
 MOUTH_PAIRS = ((81, 178), (13, 14), (311, 402))
+
+# Head axes: outer eye corners (left-right) and forehead -> chin (top-bottom).
+FOREHEAD, CHIN = 10, 152
 
 # Full contours, only used for drawing.
 RIGHT_EYE_CONTOUR = (33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7)
@@ -51,19 +60,51 @@ def mouth_aspect_ratio(pts: np.ndarray) -> float:
     return opening / width
 
 
-def euler_from_matrix(m: np.ndarray) -> tuple[float, float, float]:
-    """(pitch, yaw, roll) in degrees from a 3x3 rotation or 4x4 transform matrix.
+def head_pose(pts: np.ndarray) -> tuple[float, float, float]:
+    """(pitch, yaw, roll) in degrees from 3D landmarks.
 
-    Positive yaw = head turned to the camera's right, positive pitch = chin up.
+    Builds the face's own axes (across the eyes, forehead to chin) and takes the
+    forward normal. This has no ±180° wrap-around, unlike decomposing a full
+    transform matrix. Conventions, in image space:
+      yaw   > 0  face turned towards the right side of the image
+      pitch < 0  looking down
+      roll  > 0  head tilted clockwise in the image
     """
-    r = np.asarray(m, dtype=float)[:3, :3]
-    sy = math.hypot(r[0, 0], r[1, 0])
-    if sy > 1e-6:
-        pitch = math.atan2(r[2, 1], r[2, 2])
-        yaw = math.atan2(-r[2, 0], sy)
-        roll = math.atan2(r[1, 0], r[0, 0])
-    else:  # gimbal lock, will not happen for a driver facing a camera
-        pitch = math.atan2(-r[1, 2], r[1, 1])
-        yaw = math.atan2(-r[2, 0], sy)
-        roll = 0.0
-    return math.degrees(pitch), math.degrees(yaw), math.degrees(roll)
+    p = np.asarray(pts, dtype=float)
+    right = p[LEFT_EYE_CORNERS[1]] - p[RIGHT_EYE_CORNERS[0]]
+    down = p[CHIN] - p[FOREHEAD]
+    fwd = np.cross(down, right)  # points out of the face, towards the camera
+    n = np.linalg.norm(fwd)
+    if n < 1e-9:
+        return 0.0, 0.0, 0.0
+    fx, fy, fz = fwd / n
+    # Camera looks along +z (MediaPipe z grows away from the camera), so a
+    # frontal face has fwd = (0, 0, -1).
+    yaw = math.degrees(math.atan2(fx, -fz))
+    pitch = math.degrees(math.atan2(-fy, math.hypot(fx, fz)))
+    roll = math.degrees(math.atan2(right[1], right[0]))
+    return pitch, yaw, roll
+
+
+def gaze_ratio(pts: np.ndarray) -> float | None:
+    """Horizontal iris position within the eyes, -1 (image left) .. +1 (image right).
+
+    Requires the 478-point mesh with iris landmarks. 0 means centred.
+    """
+    if len(pts) < 478:
+        return None
+    vals = []
+    for (a, b), iris in ((RIGHT_EYE_CORNERS, RIGHT_IRIS), (LEFT_EYE_CORNERS, LEFT_IRIS)):
+        pa, pb, pi = pts[a][:2], pts[b][:2], pts[iris][:2]
+        axis = pb - pa
+        denom = float(axis @ axis)
+        if denom < 1e-6:
+            continue
+        t = float((pi - pa) @ axis) / denom
+        vals.append((t - 0.5) * 2.0)
+    return float(np.clip(np.mean(vals), -1, 1)) if vals else None
+
+
+def face_box(pts: np.ndarray) -> tuple[float, float, float, float]:
+    xs, ys = pts[:, 0], pts[:, 1]
+    return float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())

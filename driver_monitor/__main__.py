@@ -12,13 +12,19 @@ import cv2
 from . import hud
 from .alarm import Alarm
 from .detector import DEFAULT_MODEL, FaceTracker
+from .phone import NullWatcher, PhoneWatcher, hand_at_ear, phone_near_face
 from .state import Config, DriverState, Frame, Level
+
+DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config.toml"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="driver_monitor", description="Real-time driver drowsiness and distraction monitor.")
     p.add_argument("--source", default="0", help="camera index or path to a video file (default: 0)")
     p.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    p.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="thresholds file (default: config.toml)")
+    p.add_argument("--phone", choices=["mediapipe", "yolo", "off"], default="mediapipe",
+                   help="phone detection backend (yolo needs: pip install ultralytics)")
     p.add_argument("--no-alarm", action="store_true", help="disable the audible alarm")
     p.add_argument("--headless", action="store_true", help="no window; useful with --log on a video file")
     p.add_argument("--record", type=Path, help="write the annotated video to this .mp4")
@@ -36,63 +42,75 @@ def main() -> None:
     if not cap.isOpened():
         raise SystemExit(f"Could not open video source {args.source!r}")
 
-    state = DriverState(Config())
+    cfg = Config.load(args.config)
+    state = DriverState(cfg)
     alarm = Alarm(enabled=not args.no_alarm and not args.headless)
+    watcher = NullWatcher() if args.phone == "off" else PhoneWatcher(args.phone)
     writer = None
     log = args.log.open("a", encoding="utf-8") if args.log else None
     last_key: tuple | None = None
     t0 = time.monotonic()
     fps, prev = 0.0, time.monotonic()
 
-    with FaceTracker(args.model) as tracker:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            if args.mirror:
-                frame = cv2.flip(frame, 1)
-
-            t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 if is_file else time.monotonic() - t0
-            face = tracker.process(frame, int(t * 1000))
-            status = state.update(
-                Frame(t=t, face=face is not None, ear=face.ear if face else 0.0,
-                      mar=face.mar if face else 0.0, pitch=face.pitch if face else 0.0,
-                      yaw=face.yaw if face else 0.0)
-            )
-            alarm.set(status.level == Level.ALERT)
-
-            key = (status.level, tuple(r.split(" ")[0] for r in status.reasons))
-            if log and key != last_key and not status.calibrating:
-                log.write(json.dumps({"t": round(t, 2), "level": status.level.name, "reasons": status.reasons}) + "\n")
-                last_key = key
-
-            now = time.monotonic()
-            fps = 0.9 * fps + 0.1 * (1.0 / max(now - prev, 1e-6))
-            prev = now
-            hud.draw(frame, face, status, fps)
-
-            if args.record:
-                if writer is None:
-                    h, w = frame.shape[:2]
-                    rate = cap.get(cv2.CAP_PROP_FPS) or 30
-                    writer = cv2.VideoWriter(str(args.record), cv2.VideoWriter_fourcc(*"mp4v"), rate, (w, h))
-                writer.write(frame)
-
-            if not args.headless:
-                cv2.imshow("Driver Monitor  [q] quit  [c] recalibrate", frame)
-                k = cv2.waitKey(1) & 0xFF
-                if k in (ord("q"), 27):
+    try:
+        with FaceTracker(args.model) as tracker:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
                     break
-                if k == ord("c"):
-                    state.recalibrate()
+                if args.mirror:
+                    frame = cv2.flip(frame, 1)
 
-    alarm.close()
-    cap.release()
-    if writer:
-        writer.release()
-    if log:
-        log.close()
-    cv2.destroyAllWindows()
+                t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 if is_file else time.monotonic() - t0
+                face = tracker.process(frame, int(t * 1000))
+                watcher.submit(frame, t)
+                phone = watcher.latest()
+                fresh = abs(t - phone.t) < 1.0
+
+                f = Frame(t=t, face=face is not None, phone=fresh and bool(phone.phones))
+                if face is not None:
+                    f.ear, f.mar, f.pitch, f.yaw, f.gaze = face.ear, face.mar, face.pitch, face.yaw, face.gaze
+                    if face.blendshapes:
+                        f.blink, f.jaw_open = face.blink, face.jaw_open
+                    if fresh:
+                        f.phone_near_face = phone_near_face(phone.phones, face.box)
+                        f.hand_at_ear = any(hand_at_ear(hd, face.box) for hd in phone.hands)
+                status = state.update(f)
+                alarm.set(status.level == Level.ALERT)
+
+                key = (status.level, tuple(r.split(" ")[0] for r in status.reasons))
+                if log and key != last_key and not status.calibrating:
+                    log.write(json.dumps({"t": round(t, 2), "level": status.level.name, "reasons": status.reasons}) + "\n")
+                    last_key = key
+
+                now = time.monotonic()
+                fps = 0.9 * fps + 0.1 * (1.0 / max(now - prev, 1e-6))
+                prev = now
+                hud.draw(frame, face, status, fps, phone if fresh else None, cfg)
+
+                if args.record:
+                    if writer is None:
+                        h, w = frame.shape[:2]
+                        rate = cap.get(cv2.CAP_PROP_FPS) or 30
+                        writer = cv2.VideoWriter(str(args.record), cv2.VideoWriter_fourcc(*"mp4v"), rate, (w, h))
+                    writer.write(frame)
+
+                if not args.headless:
+                    cv2.imshow("Driver Monitor  [q] quit  [c] recalibrate", frame)
+                    k = cv2.waitKey(1) & 0xFF
+                    if k in (ord("q"), 27):
+                        break
+                    if k == ord("c"):
+                        state.recalibrate()
+    finally:
+        watcher.close()
+        alarm.close()
+        cap.release()
+        if writer:
+            writer.release()
+        if log:
+            log.close()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

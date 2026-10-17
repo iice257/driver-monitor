@@ -1,0 +1,38 @@
+# Driver Monitor thresholds. Edit and restart, or pass --config another.toml.
+# Every key is optional; anything missing falls back to the default in state.py.
+# Head and gaze limits are relative to the pose learned during calibration.
+
+[general]
+calibration_s = 3.0
+smoothing = 0.35            # 0..1, lower = smoother but laggier head/gaze
+
+[eyes]
+ear_ratio = 0.72            # eyes "closed" below this fraction of your open-eye EAR
+ear_floor = 0.14
+blink_score = 0.65          # MediaPipe eyeBlink blendshape, 0..1
+microsleep_s = 1.2          # closed this long -> ALERT
+perclos_window_s = 60.0
+perclos_warn = 0.15         # closed >15% of the window -> fatigue WARN
+
+[yawn]
+yawn_jaw = 0.45             # MediaPipe jawOpen blendshape, 0..1 (lower = more sensitive)
+yawn_mar = 0.45             # fallback mouth aspect ratio
+yawn_min_s = 1.0            # jaw open this long counts as a yawn
+yawn_notice_s = 3.0
+yawn_window_s = 300.0
+yawn_warn_count = 3
+
+[attention]
+yaw_limit_deg = 25.0        # head turned left/right
+pitch_down_limit_deg = 15.0 # head down (lap, phone, radio)
+pitch_up_limit_deg = 25.0
+gaze_limit = 0.45           # eyes turned without moving the head, -1..1
+hysteresis = 0.75
+distraction_s = 2.0
+no_face_s = 2.0
+
+[phone]
+phone_s = 1.0               # phone near the face this long -> ALERT
+phone_down_s = 1.0          # phone in view while looking down -> ALERT
+hand_at_ear_s = 2.0         # hand held at the ear -> "Phone call"
+phone_grace_s = 0.6
