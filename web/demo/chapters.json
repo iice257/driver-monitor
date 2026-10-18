@@ -1,5 +1,5 @@
 [
-  {"label": "Microsleep", "start": 0.0, "end": 9.76, "expect": "Eyes stay shut while the head droops: 'Eyes closed' alert after 1.2 s"},
-  {"label": "Repeated yawning", "start": 9.76, "end": 19.26, "expect": "Each yawn is noted, the squint isn't a microsleep, three yawns flag fatigue"},
-  {"label": "Looking away", "start": 19.26, "end": 29.1, "expect": "Head turns to the side window for more than 2 s: 'Eyes off the road' alert, cleared on return"}
+  {"label": "Microsleep", "start": 0.0, "end": 8.77, "expect": "Eyes stay shut while the head droops: 'Eyes closed' alert after 1.2 s"},
+  {"label": "Repeated yawning", "start": 8.77, "end": 16.75, "expect": "Each yawn is noted, the squint isn't a microsleep, three yawns flag fatigue"},
+  {"label": "Looking away", "start": 16.75, "end": 26.17, "expect": "Head turns to the side window for more than 2 s: 'Eyes off the road' alert, cleared on return"}
 ]

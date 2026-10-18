@@ -29,6 +29,21 @@ let lastKey = "";
 let fps = 0, lastFrameAt = 0, lastUi = 0;
 let running = false;
 const voice = new VoicePolicy();
+
+// ---- performance budget (open with ?perf) ------------------------------------
+// Per analysed frame, on the main thread: p95 under 16 ms in total and no task over 50 ms,
+// so the page keeps up with 30 fps video and never janks. window.__perf() reports it.
+const PERF = new URLSearchParams(location.search).has("perf");
+const perf = { face: [], phone: [], draw: [], ui: [], total: [], long: [], gaps: [] };
+if (PERF) {
+  try {
+    new PerformanceObserver((l) => l.getEntries().forEach((e) => perf.long.push(Math.round(e.duration)))).observe({ type: "longtask", buffered: true });
+  } catch {}
+  const pct = (a, q) => (a.length ? [...a].sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * q))] : 0);
+  window.__perf = () => Object.fromEntries(Object.entries(perf).map(([k, a]) => [k,
+    k === "long" ? { count: a.length, max: Math.max(0, ...a) } : { n: a.length, p50: +pct(a, 0.5).toFixed(1), p95: +pct(a, 0.95).toFixed(1), max: +Math.max(0, ...a).toFixed(1) }]));
+  window.__perfReset = () => Object.values(perf).forEach((a) => (a.length = 0));
+}
 let soundOn = readSoundPref();
 let view = readPref("dm-view", "light"); // "light": outlines only, "mesh": every landmark as a dot
 
@@ -263,10 +278,39 @@ function chapterAt(t) {
 
 // ---- main loop --------------------------------------------------------------
 
+// Analyse each decoded video frame once. rAF runs at the display rate (60 Hz or more),
+// twice the video's 30 fps, and the reel's clock moves between frames, so without this
+// the same picture was run through the models two times over.
+const FRAME_CB = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+let newFrame = !FRAME_CB;
+if (FRAME_CB) {
+  const onFrame = () => {
+    newFrame = true;
+    video.requestVideoFrameCallback(onFrame);
+  };
+  video.requestVideoFrameCallback(onFrame);
+}
+
+// The models see a 640 px wide copy of the frame: landmarks come back normalised, so the
+// precision is the same, and uploading a quarter of the pixels is most of the per-frame cost.
+const INPUT_W = new URLSearchParams(location.search).has("fullres") ? 0 : 640;
+const input = document.createElement("canvas");
+const inputCtx = input.getContext("2d", { alpha: false, desynchronized: true });
+
+function frameInput() {
+  if (!INPUT_W || video.videoWidth <= INPUT_W) return video;
+  const ih = Math.round((video.videoHeight / video.videoWidth) * INPUT_W);
+  if (input.width !== INPUT_W || input.height !== ih) [input.width, input.height] = [INPUT_W, ih];
+  inputCtx.drawImage(video, 0, 0, INPUT_W, ih);
+  return input;
+}
+
 function tick() {
   requestAnimationFrame(tick);
   if (!face || video.readyState < 2 || video.paused || video.ended) return;
   if (video.videoWidth === 0) return;
+  if (!newFrame) return;
+  newFrame = !FRAME_CB;
 
   const now = performance.now();
   let t;
@@ -290,21 +334,26 @@ function tick() {
     canvas.height = video.videoHeight;
   }
   const w = canvas.width, h = canvas.height;
-  const reading = readFace(face.detectForVideo(video, now), w, h);
+  const p0 = performance.now();
+  const frame = frameInput();
+  const reading = readFace(face.detectForVideo(frame, now), w, h);
+  const p1 = performance.now();
 
   frameNo++;
   if (objects && hands && frameNo % PHONE_EVERY === 0) {
-    const det = objects.detectForVideo(video, now);
-    const hr = hands.detectForVideo(video, now);
+    const det = objects.detectForVideo(frame, now);
+    const hr = hands.detectForVideo(frame, now);
     phone = {
       t,
       phones: (det.detections || []).map((d) => ({
-        box: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.originX + d.boundingBox.width, d.boundingBox.originY + d.boundingBox.height],
+        // Detector boxes are in the input's pixels; scale them back to the video's.
+        box: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.originX + d.boundingBox.width, d.boundingBox.originY + d.boundingBox.height].map((v) => (v * w) / frame.width),
         score: d.categories[0]?.score || 0,
       })),
       hands: (hr.landmarks || []).map((lm) => lm.map((p) => [p.x * w, p.y * h])),
     };
   }
+  const p2 = performance.now();
   const fresh = Math.abs(t - phone.t) < 1;
 
   const f = { t, face: !!reading, ear: 0, mar: 0, pitch: 0, yaw: 0, gaze: 0, blink: null, jawOpen: null, phone: fresh && phone.phones.length > 0 };
@@ -324,6 +373,7 @@ function tick() {
   if (mode === "demo" && fps) video.playbackRate = Math.max(0.35, Math.min(1, fps / 22));
 
   draw(reading, s, fresh ? phone : null);
+  const p3 = performance.now();
   logState(s, t);
   if (!s.calibrating) {
     const cue = voice.update(s.reasons, t, s.yawns);
@@ -332,6 +382,12 @@ function tick() {
   if (now - lastUi > 66) {
     lastUi = now;
     renderPanel(reading, s, fresh ? phone : null);
+  }
+  if (PERF) {
+    const p4 = performance.now();
+    perf.face.push(p1 - p0); if (p2 - p1 > 0.05) perf.phone.push(p2 - p1);
+    perf.draw.push(p3 - p2); perf.ui.push(p4 - p3); perf.total.push(p4 - p0);
+    if (dt > 0 && dt < 1000) perf.gaps.push(dt);
   }
 }
 

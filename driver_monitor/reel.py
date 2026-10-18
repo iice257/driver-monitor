@@ -3,9 +3,11 @@
     python -m driver_monitor.reel samples/scenarios.json
 
 Writes, next to the scenarios file:
-  reel.mp4      the clips as one continuous drive: dissolves at the cuts and a single
-                uniform cabin ambience underneath. The web demo analyses this one live,
-                so it carries no overlay.
+  reel.mp4      the clips as one continuous, seamlessly looping drive: muted, mirrored so
+                the driver sits on the left, cut where the poses match, dissolved, with
+                one steady cabin ambience underneath. The web demo analyses this one
+                live, so it carries no overlay. A scenario's "min_end" keeps its clip
+                running at least that long.
   showcase.mp4  the same reel run through the monitor: HUD, alert banner and flashing
                 border drawn on every frame, and each alert spoken in the pre-rendered
                 voice (voice.py) over the ambience, exactly when the live alarm would.
@@ -25,6 +27,7 @@ import wave
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from . import hud
 from .alerts import CUES, VoicePolicy
@@ -50,51 +53,92 @@ def probe(path: Path) -> tuple[float, bool]:
     return float(info["format"]["duration"]), has_audio
 
 
-def join(clips: list[Path], out: Path, ambience: Path, xfade: float = 0.5) -> list[float]:
-    """Join the clips into one continuous take; returns where each scenario starts.
+def _thumbs(clip: Path) -> list[np.ndarray]:
+    """Small grey frames of the driver's half of the picture, for matching cut points."""
+    cap, out = cv2.VideoCapture(str(clip)), []
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        g = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (128, 72), interpolation=cv2.INTER_AREA)
+        out.append(g[7:, 38:96].astype(np.float32))  # the driver, not the road racing past the windows
+    cap.release()
+    return out
 
-    Picture: a short dissolve at every cut. Every clip opens on the same reference frame,
-    so the dissolve reads as the same drive rather than a new shot.
-    Sound: one uniform cabin ambience under the whole reel instead of each clip's own
-    track, which differ in level and timbre and give the cuts away. The ambience clip's
-    sound is looped with long crossfades that fall between the cuts, then normalised.
+
+def best_cuts(clips: list[Path], min_ends: list[float], head: float = 1.5) -> list[tuple[float, float]]:
+    """(start, end) per clip so that every join, and the loop back to the start, falls where
+    the outgoing and incoming frames look most alike: the driver in the same pose.
+
+    Each clip must run to at least its min_end (so its scenario plays out) and may skip up
+    to `head` seconds of its opening, which is the shared reference pose anyway.
     """
-    durs = [probe(c)[0] for c in clips]
-    total = sum(durs) - xfade * (len(clips) - 1)
-    starts = [sum(durs[:i]) - xfade * i + (xfade / 2 if i else 0.0) for i in range(len(clips))]
+    thumbs = [_thumbs(c) for c in clips]
+    rates = [cv2.VideoCapture(str(c)).get(cv2.CAP_PROP_FPS) or 24.0 for c in clips]
+    n = len(clips)
+    starts, ends = [0] * n, [len(t) - 1 for t in thumbs]
+    # Choose each join's (end of i, start of i+1) pair; the last join loops to clip 0.
+    for i in range(n):
+        j = (i + 1) % n
+        a, b = thumbs[i], thumbs[j]
+        lo = min(int(min_ends[i] * rates[i]), len(a) - 1)
+        heads = range(0, min(int(head * rates[j]), len(b) - 1) + 1)
+        best = min(((float(np.abs(a[e] - b[s]).mean()), e, s) for e in range(lo, len(a)) for s in heads))
+        ends[i], starts[j] = best[1], best[2]
+    return [(s / r, (e + 1) / r) for s, e, r in zip(starts, ends, rates)]
+
+
+def join(clips: list[Path], out: Path, cuts: list[tuple[float, float]], ambience: Path | None = None,
+         xfade: float = 0.6) -> list[float]:
+    """Join the clips into one continuous, seamlessly looping take; returns where each scenario starts.
+
+    Picture: the clips' own sound is dropped, the picture is mirrored (driver on the left of
+    the car), and each clip is trimmed to `cuts` and dissolved into the next. The last clip
+    dissolves into the opening of the first, and the reel starts just after that opening,
+    so playing it on loop never shows a cut.
+    Sound: one steady cabin ambience for the whole reel (a synthesised road rumble and tyre
+    hiss, or `ambience` looped), with no fades, so it loops as cleanly as the picture.
+    """
+    n = len(clips)
+    (s0, e0), x = cuts[0], xfade
+    # Segments: clip 0 from just after its opening, the other clips, then clip 0's opening again.
+    # (input, start, end); clip 0 is opened a second time (input n) for the closing segment.
+    segs = [(0, s0 + x, e0)] + [(i, *cuts[i]) for i in range(1, n)] + [(n, s0, s0 + x + 0.1)]
+    lens = [e - s for _, s, e in segs]
+    total = sum(lens[:-1]) - x * (n - 1)
 
     inputs, chains = [], []
-    for i, clip in enumerate(clips):
-        inputs += ["-i", str(clip)]
-        chains.append(f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:-1:-1,"
-                      f"fps={FPS},setsar=1,format=yuv420p,trim=duration={durs[i]},setpts=PTS-STARTPTS[v{i}]")
-    last, offset = "[v0]", 0.0
-    for i in range(1, len(clips)):
-        offset += durs[i - 1] - xfade
-        chains.append(f"{last}[v{i}]xfade=transition=fade:duration={xfade}:offset={offset:.3f}[x{i}]")
-        last = f"[x{i}]"
+    for clip in [*clips, clips[0]]:
+        inputs += ["-an", "-i", str(clip)]
+    for k, (i, s, e) in enumerate(segs):
+        chains.append(f"[{i}:v]trim=start={s:.4f}:end={e:.4f},setpts=PTS-STARTPTS,"
+                      f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:-1:-1,hflip,"
+                      f"fps={FPS},setsar=1,format=yuv420p[v{k}]")
+    last, offset, starts = "[v0]", 0.0, [0.0]
+    for k in range(1, len(segs)):
+        offset += lens[k - 1] - x
+        chains.append(f"{last}[v{k}]xfade=transition=fade:duration={x}:offset={offset:.3f}[x{k}]")
+        last = f"[x{k}]"
+        if k < n:
+            starts.append(round(offset + x / 2, 3))
+    chains.append(f"{last}trim=duration={total:.3f},setpts=PTS-STARTPTS[v]")
 
-    # Ambience bed: overlapping copies of one clip's sound, 3 s equal-power crossfades.
-    amb_dur, has_audio = probe(ambience)
-    if not has_audio:
-        raise SystemExit(f"{ambience} has no sound to use as ambience")
-    seg, overlap = amb_dur - 0.4, 3.0
-    copies = 1
-    while copies * seg - (copies - 1) * overlap < total + 1:
-        copies += 1
-    a0 = len(clips)
-    for k in range(copies):
-        inputs += ["-i", str(ambience)]
-        chains.append(f"[{a0 + k}:a]aformat=sample_rates={RATE}:channel_layouts=stereo,"
-                      f"atrim=start=0.2:duration={seg},asetpts=PTS-STARTPTS[b{k}]")
-    bed = "[b0]"
-    for k in range(1, copies):
-        chains.append(f"{bed}[b{k}]acrossfade=d={overlap}:c1=qsin:c2=qsin[bx{k}]")
-        bed = f"[bx{k}]"
-    chains.append(f"{bed}atrim=duration={total},asetpts=PTS-STARTPTS,loudnorm=I=-30:LRA=4:TP=-6,"
-                  f"aresample={RATE},afade=t=in:d=0.6,afade=t=out:st={total - 1.0:.3f}:d=1.0[a]")
+    a = n + 1
+    if ambience is None:
+        # Two decorrelated channels of cabin noise: low road rumble plus a quieter tyre hiss.
+        for ch, seed in (("L", 7), ("R", 11)):
+            chains.append(f"anoisesrc=color=brown:amplitude=0.9:seed={seed}:sample_rate={RATE}:duration={total + 1:.3f},"
+                          f"lowpass=f=220,lowpass=f=220[rum{ch}]")
+            chains.append(f"anoisesrc=color=pink:amplitude=0.25:seed={seed + 100}:sample_rate={RATE}:duration={total + 1:.3f},"
+                          f"highpass=f=400,lowpass=f=3000,volume=0.22[his{ch}]")
+            chains.append(f"[rum{ch}][his{ch}]amix=inputs=2:normalize=0[m{ch}]")
+        chains.append("[mL][mR]join=inputs=2:channel_layout=stereo[bed0]")
+    else:
+        inputs += ["-stream_loop", "-1", "-i", str(ambience)]
+        chains.append(f"[{a}:a]aformat=sample_rates={RATE}:channel_layouts=stereo[bed0]")
+    chains.append(f"[bed0]atrim=duration={total:.3f},asetpts=PTS-STARTPTS,loudnorm=I=-30:LRA=2:TP=-6,aresample={RATE}[a]")
 
-    ffmpeg(*inputs, "-filter_complex", ";".join(chains), "-map", last, "-map", "[a]",
+    ffmpeg(*inputs, "-filter_complex", ";".join(chains), "-map", "[v]", "-map", "[a]", "-t", f"{total:.3f}",
            "-c:v", "libx264", "-crf", "22", "-preset", "slow", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out))
     return starts
@@ -192,8 +236,8 @@ def main() -> None:
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     p.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     p.add_argument("--web", type=Path, help="also refresh the static site's demo folder, e.g. web/demo")
-    p.add_argument("--ambience", default=None, help="clip whose sound becomes the reel's ambience (default: the first)")
-    p.add_argument("--xfade", type=float, default=0.5, help="dissolve between scenarios, seconds")
+    p.add_argument("--ambience", default=None, help="sound file to loop as the ambience (default: synthesised cabin noise)")
+    p.add_argument("--xfade", type=float, default=0.6, help="dissolve between scenarios, seconds")
     args = p.parse_args()
 
     folder = args.spec.parent
@@ -201,10 +245,14 @@ def main() -> None:
     clips = [folder / sc["clip"] for sc in scenarios]
     reel, showcase = folder / "reel.mp4", folder / "showcase.mp4"
 
-    ambience = folder / args.ambience if args.ambience else clips[0]
-    starts = join(clips, reel, ambience, args.xfade)
+    cuts = best_cuts(clips, [sc.get("min_end", 0.0) for sc in scenarios])
+    ambience = folder / args.ambience if args.ambience else None
+    starts = join(clips, reel, cuts, ambience, args.xfade)
     total, _ = probe(reel)
-    print(f"reel.mp4      {total:.1f}s, {len(clips)} scenarios, one ambience track ({ambience.name})")
+    print(f"reel.mp4      {total:.1f}s, {len(clips)} scenarios, loops seamlessly, "
+          f"ambience: {ambience.name if ambience else 'synthesised cabin noise'}")
+    for sc, (s, e) in zip(scenarios, cuts):
+        print(f"  {sc['clip']:14} {s:4.2f}-{e:5.2f}s")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)

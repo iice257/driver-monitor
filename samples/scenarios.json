@@ -2,6 +2,7 @@
   {
     "label": "Microsleep",
     "clip": "drowsy.mp4",
+    "min_end": 8.0,
     "summary": "Eyes stay shut while the head droops: 'Eyes closed' alert after 1.2 s",
     "expect": [{"reason": "Eyes closed", "within": [3.5, 8.0]}],
     "forbid": ["Phone", "Fatigue: PERCLOS"]
@@ -9,6 +10,7 @@
   {
     "label": "Repeated yawning",
     "clip": "yawn.mp4",
+    "min_end": 9.0,
     "summary": "Each yawn is noted, the squint isn't a microsleep, three yawns flag fatigue",
     "expect": [{"reason": "Yawn"}, {"reason": "Fatigue: 3 yawns"}],
     "forbid": ["Eyes closed", "Eyes off road", "Phone", "Fatigue: PERCLOS"]
@@ -16,6 +18,7 @@
   {
     "label": "Looking away",
     "clip": "lookaway.mp4",
+    "min_end": 8.5,
     "summary": "Head turns to the side window for more than 2 s: 'Eyes off the road' alert, cleared on return",
     "expect": [{"reason": "Eyes off road", "within": [4.0, 9.0]}],
     "forbid": ["Eyes closed", "Yawn", "Phone", "Fatigue"]
