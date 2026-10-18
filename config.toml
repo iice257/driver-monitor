@@ -13,6 +13,7 @@ blink_score = 0.65          # MediaPipe eyeBlink blendshape, 0..1
 microsleep_s = 1.2          # closed this long -> ALERT
 perclos_window_s = 60.0
 perclos_warn = 0.15         # closed >15% of the window -> fatigue WARN
+perclos_min_s = 20.0        # need this much history before judging PERCLOS
 
 [yawn]
 yawn_jaw = 0.45             # MediaPipe jawOpen blendshape, 0..1 (lower = more sensitive)
@@ -21,6 +22,7 @@ yawn_min_s = 1.0            # jaw open this long counts as a yawn
 yawn_notice_s = 3.0
 yawn_window_s = 300.0
 yawn_warn_count = 3
+yawn_squint_s = 6.0         # eyes shut during a yawn up to this long aren't a microsleep
 
 [attention]
 yaw_limit_deg = 25.0        # head turned left/right

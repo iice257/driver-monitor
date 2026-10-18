@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Driver Monitor</title>
+  <meta name="description" content="Drowsiness and distraction detection that runs in your browser. Watch it on an AI-generated test reel, or try it on your own camera." />
+  <meta name="theme-color" content="#0b0b0c" />
+  <meta property="og:title" content="Driver Monitor" />
+  <meta property="og:description" content="A webcam that can tell a blink from a microsleep. Runs entirely in your browser." />
+  <meta property="og:image" content="/demo/poster.jpg" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="/" aria-label="Driver Monitor home">
+      <span class="brand-dot" aria-hidden="true"></span>Driver Monitor
+    </a>
+    <nav class="bar-links">
+      <a href="https://github.com/iice257/driver-monitor" target="_blank" rel="noopener noreferrer">Source</a>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section class="intro">
+      <div>
+        <h1>Tells a blink from a microsleep.</h1>
+        <p class="lede">Face landmarks, head pose and gaze run live in this tab, and an alert fires only when a condition lasts long enough to matter.</p>
+      </div>
+      <div class="modes" role="tablist" aria-label="Input">
+        <button class="mode is-active" role="tab" aria-selected="true" data-mode="demo">Test reel</button>
+        <button class="mode" role="tab" aria-selected="false" data-mode="camera">Your camera</button>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <div class="stage-col">
+        <div class="stage" id="stage" data-level="0">
+          <video id="video" playsinline muted preload="auto" poster="/demo/poster.jpg"></video>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+          <div class="flash" aria-hidden="true"></div>
+          <div class="banner" id="banner" role="alert" hidden>
+            <svg class="banner-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 1.8 20.8h20.4L12 3.2Z"/><path class="banner-mark" d="M11 9.5h2v5.5h-2zM11 16.6h2v2h-2z"/></svg>
+            <div class="banner-copy">
+              <p class="banner-title" id="banner-title"></p>
+              <p class="banner-detail" id="banner-detail"></p>
+            </div>
+          </div>
+          <button class="sound-btn" id="sound" type="button" aria-pressed="true" aria-label="Mute alerts and reel sound">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path class="cross" d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <div class="veil" id="veil">
+            <div class="veil-inner">
+              <div class="spinner" aria-hidden="true"></div>
+              <p id="veil-text">Loading models</p>
+              <button class="primary" id="veil-action" hidden>Start</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="transport" id="transport">
+          <button class="icon-btn" id="play" aria-label="Play">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5.5v13l10.5-6.5z"/><path class="i-pause" d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+          </button>
+          <div class="chapters" id="chapters"></div>
+          <span class="clock" id="clock">0:00</span>
+        </div>
+      </div>
+
+      <aside class="inspector" aria-label="Live readings">
+        <div class="status">
+          <span class="status-dot" id="status-dot"></span>
+          <div>
+            <p class="status-label" id="status-label">Waiting</p>
+            <p class="status-sub" id="status-sub">Pick an input to begin</p>
+          </div>
+        </div>
+        <div class="calib" id="calib" hidden>
+          <div class="calib-track"><div class="calib-fill" id="calib-fill"></div></div>
+        </div>
+
+        <dl class="readings" id="readings"></dl>
+
+        <div class="counters">
+          <div><span class="counter-label">Yawns</span><span class="counter-value" id="yawns">0</span></div>
+          <div><span class="counter-label">Phone</span><span class="counter-value" id="phone">No</span></div>
+          <div><span class="counter-label">FPS</span><span class="counter-value" id="fps">–</span></div>
+        </div>
+
+        <div class="log-head">
+          <h2>Events</h2>
+          <button class="text-btn" id="recal">Recalibrate</button>
+        </div>
+        <ol class="log" id="log"><li class="log-empty">Alerts will appear here as they happen.</li></ol>
+      </aside>
+    </section>
+
+    <section class="notes">
+      <p><strong>Private by design.</strong> Everything runs on your device with MediaPipe. No frame leaves this page.</p>
+      <p><strong>About the reel.</strong> The driver footage is AI-generated from one reference image, so no real person is on camera. Each scenario recalibrates at its cut, as a new driver would. <a href="/demo/showcase.mp4" target="_blank" rel="noopener">Watch the recorded run</a> with the desktop app's overlay and voice.</p>
+      <p><strong>Camera tips.</strong> Hold your normal driving pose for the first three seconds while it learns your baseline, then try closing your eyes, yawning or looking away. Alerts are spoken aloud; mute them with the speaker button.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

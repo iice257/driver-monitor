@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from . import metrics
+from .alerts import cue_for
 from .detector import FaceReading
 from .phone import PhoneResult
 from .state import Level, Status
@@ -75,8 +76,48 @@ def _detections(img: np.ndarray, phone: PhoneResult) -> None:
             cv2.line(img, tuple(p[a]), tuple(p[b]), (210, 170, 90), 1, AA)
 
 
+def _warning_icon(img: np.ndarray, cx: int, cy: int, size: int, color, ink) -> None:
+    pts = np.array([(cx, cy - size), (cx + size, cy + int(size * 0.75)), (cx - size, cy + int(size * 0.75))], np.int32)
+    cv2.fillPoly(img, [pts], ink, AA)
+    cv2.line(img, (cx, cy - size // 3), (cx, cy + size // 5), color, max(2, size // 6), AA)
+    cv2.circle(img, (cx, cy + int(size * 0.45)), max(1, size // 10), color, -1, AA)
+
+
+def _alert_overlay(img: np.ndarray, s: Status, t: float) -> None:
+    """Flashing frame border plus a banner naming the reason, bottom centre, clear of the face."""
+    h, w = img.shape[:2]
+    color = LEVEL_COLOR[s.level]
+    urgent = s.level == Level.ALERT
+    ink = WHITE if urgent else (4, 20, 27)  # dark text on amber reads better than white
+    # Border: ALERT flashes at ~2.5 Hz, WARN breathes slowly.
+    phase = 0.5 + 0.5 * np.cos(2 * np.pi * t * (2.5 if urgent else 0.8))
+    thick = 14 if urgent else 8
+    alpha = (0.35 + 0.6 * phase) if urgent else (0.3 + 0.35 * phase)
+    for x0, y0, x1, y1 in ((0, 0, w, thick), (0, h - thick, w, h), (0, thick, thick, h - thick), (w - thick, thick, w, h - thick)):
+        _blend_rect(img, x0, y0, x1, y1, color, alpha)
+
+    cues = [c for c in (cue_for(r) for r in s.reasons) if c is not None]
+    headline = cues[0].headline if cues else s.reasons[0].upper()
+    detail = "  /  ".join(s.reasons)
+    scale = max(0.8, w / 1280 * 1.05)
+    (hw, hh), _ = cv2.getTextSize(headline, FONT, scale, 2)
+    (dw, dh), _ = cv2.getTextSize(detail, FONT, scale * 0.5, 1)
+    icon = int(hh * 0.9)
+    pad = int(18 * scale)
+    bw = max(hw + icon * 2 + pad, dw) + 2 * pad
+    bh = hh + dh + 3 * pad
+    bx0 = (w - bw) // 2
+    by0 = h - thick - int(20 * scale) - bh
+    _blend_rect(img, bx0, by0, bx0 + bw, by0 + bh, color, 0.9)
+    tx = bx0 + (bw - (hw + icon * 2 + pad)) // 2
+    ty = by0 + pad + hh
+    _warning_icon(img, tx + icon, ty - hh // 2, icon, color, ink)
+    cv2.putText(img, headline, (tx + icon * 2 + pad, ty), FONT, scale, ink, 2, AA)
+    cv2.putText(img, detail, (bx0 + (bw - dw) // 2, ty + pad + dh), FONT, scale * 0.5, ink, 1, AA)
+
+
 def draw(img: np.ndarray, face: FaceReading | None, s: Status, fps: float,
-         phone: PhoneResult | None = None, cfg=None) -> np.ndarray:
+         phone: PhoneResult | None = None, cfg=None, t: float = 0.0) -> np.ndarray:
     h, w = img.shape[:2]
     color = LEVEL_COLOR[s.level]
 
@@ -121,15 +162,9 @@ def draw(img: np.ndarray, face: FaceReading | None, s: Status, fps: float,
     cv2.putText(img, f"Phone  {'yes' if n_phones else 'no'}", (x + bw - 70, y), FONT, 0.42,
                 LEVEL_COLOR[Level.ALERT] if n_phones else MUTED, 1, AA)
 
-    # Alert banner and frame border
-    if s.level > Level.OK and s.reasons:
-        text = "  /  ".join(s.reasons)
-        (tw, th), _ = cv2.getTextSize(text, FONT, 0.6, 1)
-        bx0, by1 = 16, h - 16
-        _blend_rect(img, bx0, by1 - th - 26, min(w - 16, bx0 + tw + 32), by1, color, 0.85)
-        cv2.putText(img, text, (bx0 + 16, by1 - 13), FONT, 0.6, WHITE, 1, AA)
-    if s.level == Level.ALERT:
-        cv2.rectangle(img, (0, 0), (w - 1, h - 1), color, 6)
+    # Alert banner and flashing frame border
+    if s.level > Level.OK and s.reasons and not s.calibrating:
+        _alert_overlay(img, s, t)
 
     if s.calibrating:
         msg = "Calibrating: look at the road as you normally would"

@@ -196,3 +196,21 @@ def test_phone_geometry():
     assert not hand_at_ear(np.tile([250, 400], (21, 1)).astype(float), face)
     assert phone_near_face([((210, 200, 260, 280), 0.6)], face)
     assert not phone_near_face([((600, 400, 650, 470), 0.6)], face)
+
+
+def test_squint_during_yawn_is_not_a_microsleep():
+    st, t = calibrated()
+    s, t = run(st, 2.0, t, jaw_open=0.7, ear=CLOSED)
+    assert "Yawn" in s.reasons and s.level < Level.ALERT
+
+
+def test_eyes_closed_with_mouth_hanging_open_still_alerts():
+    st, t = calibrated()
+    s, t = run(st, 8.0, t, jaw_open=0.7, ear=CLOSED)
+    assert any(r.startswith("Eyes closed") for r in s.reasons)
+
+
+def test_perclos_needs_history():
+    st, t = calibrated()
+    s, t = run(st, 3.0, t, ear=CLOSED)  # mostly closed, but only a few seconds of history
+    assert not any(r.startswith("Fatigue: PERCLOS") for r in s.reasons)

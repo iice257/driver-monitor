@@ -25,11 +25,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="thresholds file (default: config.toml)")
     p.add_argument("--phone", choices=["mediapipe", "yolo", "off"], default="mediapipe",
                    help="phone detection backend (yolo needs: pip install ultralytics)")
-    p.add_argument("--no-alarm", action="store_true", help="disable the audible alarm")
+    p.add_argument("--no-alarm", action="store_true", help="disable the spoken / audible alarm")
+    p.add_argument("--beep", action="store_true", help="beep instead of speaking the alert")
     p.add_argument("--headless", action="store_true", help="no window; useful with --log on a video file")
     p.add_argument("--record", type=Path, help="write the annotated video to this .mp4")
     p.add_argument("--log", type=Path, help="append state changes as JSON lines to this file")
     p.add_argument("--mirror", action="store_true", help="flip webcam horizontally for display")
+    p.add_argument("--recalibrate-at", default="", metavar="T1,T2",
+                   help="seconds at which to recalibrate, e.g. the cuts in a spliced test reel")
     return p.parse_args()
 
 
@@ -44,13 +47,14 @@ def main() -> None:
 
     cfg = Config.load(args.config)
     state = DriverState(cfg)
-    alarm = Alarm(enabled=not args.no_alarm and not args.headless)
+    alarm = Alarm(enabled=not args.no_alarm and not args.headless, voice=not args.beep)
     watcher = NullWatcher() if args.phone == "off" else PhoneWatcher(args.phone)
     writer = None
     log = args.log.open("a", encoding="utf-8") if args.log else None
     last_key: tuple | None = None
     t0 = time.monotonic()
     fps, prev = 0.0, time.monotonic()
+    recal = sorted(float(x) for x in args.recalibrate_at.split(",") if x.strip())
 
     try:
         with FaceTracker(args.model) as tracker:
@@ -62,6 +66,10 @@ def main() -> None:
                     frame = cv2.flip(frame, 1)
 
                 t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 if is_file else time.monotonic() - t0
+                if recal and t >= recal[0]:
+                    recal.pop(0)
+                    state.recalibrate()
+                    alarm.reset()
                 face = tracker.process(frame, int(t * 1000))
                 watcher.submit(frame, t)
                 phone = watcher.latest()
@@ -76,7 +84,8 @@ def main() -> None:
                         f.phone_near_face = phone_near_face(phone.phones, face.box)
                         f.hand_at_ear = any(hand_at_ear(hd, face.box) for hd in phone.hands)
                 status = state.update(f)
-                alarm.set(status.level == Level.ALERT)
+                if not status.calibrating:
+                    alarm.update(status.reasons, t, urgent=status.level == Level.ALERT, yawns=status.yawns)
 
                 key = (status.level, tuple(r.split(" ")[0] for r in status.reasons))
                 if log and key != last_key and not status.calibrating:
@@ -86,7 +95,7 @@ def main() -> None:
                 now = time.monotonic()
                 fps = 0.9 * fps + 0.1 * (1.0 / max(now - prev, 1e-6))
                 prev = now
-                hud.draw(frame, face, status, fps, phone if fresh else None, cfg)
+                hud.draw(frame, face, status, fps, phone if fresh else None, cfg, t)
 
                 if args.record:
                     if writer is None:
@@ -102,6 +111,7 @@ def main() -> None:
                         break
                     if k == ord("c"):
                         state.recalibrate()
+                        alarm.reset()
     finally:
         watcher.close()
         alarm.close()

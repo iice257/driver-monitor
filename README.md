@@ -18,6 +18,12 @@ It tracks 478 facial landmarks and 52 facial blendshapes per frame, detects phon
 
 Every threshold lives in [`config.toml`](config.toml), so you can tune it for your camera position without touching code.
 
+### Alerts you can hear and see
+
+Each alert is spoken by name with offline text-to-speech (pyttsx3: SAPI5 on Windows), on a background thread so the video never stalls: "Eyes closed. Wake up!", "Yawning detected", "Eyes off the road", "Phone detected", "Phone call detected", "Fatigue detected. Take a break". A phrase is said when its condition starts and repeated at a steady pace while it holds (every 4 s for eyes closed), never every frame. Without a speech engine, or with `--beep`, it falls back to beeps.
+
+On screen, the preview shows a banner naming the reason (red for ALERT, amber for caution) and the frame border flashes. The web demo does the same with the browser's `speechSynthesis` and a matching banner and border pulse; the speaker button mutes it.
+
 ### How it works
 
 ```
@@ -58,6 +64,7 @@ python -m driver_monitor --source drive.mp4            # a recorded video
 python -m driver_monitor --source drive.mp4 --headless --log events.jsonl
 python -m driver_monitor --record out.mp4              # save the annotated video
 python -m driver_monitor --no-alarm --mirror
+python -m driver_monitor --beep                        # beeps instead of spoken alerts
 python -m driver_monitor --phone yolo                  # YOLO phone detector (pip install ultralytics, AGPL-3.0)
 python -m driver_monitor --phone off                   # face only, lightest
 python -m driver_monitor --config night.toml           # alternative thresholds
@@ -72,6 +79,17 @@ The HUD shows each live signal with its threshold marker. Watch where your value
 - Glasses cause false eye closure: lower `ear_ratio` or raise `blink_score`.
 
 `--log` writes one JSON line per state change, for example `{"t": 42.1, "level": "ALERT", "reasons": ["Eyes closed 1.3s"]}`.
+
+## Test reel
+
+`samples/` holds three AI-generated scenarios (microsleep, repeated yawning, looking away). All three were made with Veo in Gemini from one reference image, [`samples/driver_reference.jpg`](samples/driver_reference.jpg), used as the opening frame, so the same driver appears in every clip. Generate new scenarios from that image to keep the reel consistent.
+
+```bash
+python -m driver_monitor.evaluate samples/scenarios.json         # each clip raises what it should, and nothing it shouldn't
+python -m driver_monitor.reel samples/scenarios.json --web web/demo
+```
+
+`reel` joins the clips in scenario order with their sound (`reel.mp4`, which the web demo analyses live), and renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the original audio. `--web` also refreshes the site's poster and chapter list.
 
 ## Tests
 
@@ -88,10 +106,14 @@ driver_monitor/
   detector.py       MediaPipe FaceLandmarker wrapper (landmarks + blendshapes)
   phone.py          phone detector + hand landmarks on a background thread
   state.py          temporal logic, calibration, alert levels
-  hud.py            overlay rendering
-  alarm.py          non-blocking audible alarm
+  hud.py            overlay rendering, alert banner and border flash
+  alerts.py         spoken phrase and banner text per reason, and when to repeat them
+  alarm.py          spoken alerts (offline TTS) on a background thread, beep fallback
+  evaluate.py       scenario checks against the sample clips
+  reel.py           builds the demo reel and the annotated showcase video
   __main__.py       CLI
-tests/              unit tests for metrics and state logic
+tests/              unit tests for metrics, state logic and the alert voice
+web/                static browser demo (MediaPipe in the page), deployed on Vercel
 ```
 
 ## Limitations and roadmap

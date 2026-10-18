@@ -35,6 +35,7 @@ class Config:
     microsleep_s: float = 1.2
     perclos_window_s: float = 60.0
     perclos_warn: float = 0.15
+    perclos_min_s: float = 20.0      # don't judge PERCLOS on less history than this
 
     # Yawning
     yawn_jaw: float = 0.45           # jawOpen blendshape
@@ -43,6 +44,7 @@ class Config:
     yawn_notice_s: float = 3.0       # show "Yawn" briefly after each one
     yawn_window_s: float = 300.0
     yawn_warn_count: int = 3
+    yawn_squint_s: float = 6.0       # eyes squeezed shut during a yawn this long aren't a microsleep
 
     # Attention
     yaw_limit_deg: float = 25.0
@@ -194,7 +196,9 @@ class DriverState:
             total += t1 - t0
             if c0:
                 closed_time += t1 - t0
-        return closed_time / total if total > 0 else 0.0
+        if total < min(self.cfg.perclos_min_s, self.cfg.perclos_window_s):
+            return 0.0  # a few seconds of history makes one blink look like fatigue
+        return closed_time / total
 
     def _attention(self, f: Frame, calibrating: bool) -> tuple[float, float, float, float]:
         cfg = self.cfg
@@ -220,17 +224,20 @@ class DriverState:
         calibrating = not self.calibrated and self._calibrate(f)
         missing_for = self._missing.update(not f.face, f.t)
 
+        # Yawns: jaw held open, which talking or a quick laugh doesn't do.
+        jaw = f.jaw_open
+        mouth_open = f.face and (jaw > cfg.yawn_jaw if jaw is not None else f.mar > cfg.yawn_mar)
+        open_for = self._mouth.update(mouth_open, f.t)
+        # People squeeze their eyes shut while yawning; that isn't a microsleep. A mouth that is
+        # merely opening (below the yawn threshold) counts too, since the squint often leads.
+        opening = f.face and (jaw > cfg.yawn_jaw * 0.6 if jaw is not None else f.mar > cfg.yawn_mar * 0.6)
+        squint = opening and open_for < cfg.yawn_squint_s
+
         # Eyes: EAR against the personal threshold, or a confident blink blendshape.
         thr = self.threshold()
-        closed = f.face and (f.ear < thr or (f.blink is not None and f.blink > cfg.blink_score))
+        closed = f.face and not squint and (f.ear < thr or (f.blink is not None and f.blink > cfg.blink_score))
         closed_for = self._closed.update(closed, f.t)
         perclos = self._perclos(f.t, closed)
-
-        # Yawns: jaw held open, which talking or a quick laugh doesn't do.
-        mouth_open = f.face and (
-            f.jaw_open > cfg.yawn_jaw if f.jaw_open is not None else f.mar > cfg.yawn_mar
-        )
-        open_for = self._mouth.update(mouth_open, f.t)
         yawning = open_for >= cfg.yawn_min_s
         if yawning and not self._yawn_counted:
             self._yawns.append(f.t)

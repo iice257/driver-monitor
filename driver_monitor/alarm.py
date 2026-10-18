@@ -1,43 +1,86 @@
-"""Non-blocking audible alarm. Uses winsound on Windows, the terminal bell elsewhere."""
+"""Non-blocking spoken alarm.
+
+Alerts are read out with offline text-to-speech (pyttsx3: SAPI5 on Windows, NSSpeech on
+macOS, eSpeak on Linux) on a background thread, so the video loop never waits for the
+voice. VoicePolicy decides what to say and how often. If no TTS engine is available the
+alarm falls back to beeps: winsound on Windows, the terminal bell elsewhere.
+"""
 
 from __future__ import annotations
 
+import queue
 import sys
 import threading
 import time
 
+from .alerts import Cue, VoicePolicy
+
+
+def beep(urgent: bool = True) -> None:
+    if sys.platform == "win32":
+        import winsound
+
+        winsound.Beep(1800, 180)
+        if urgent:
+            winsound.Beep(1400, 180)
+    else:
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+        time.sleep(0.36)
+
 
 class Alarm:
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(self, enabled: bool = True, voice: bool = True, rate: int = 185) -> None:
         self.enabled = enabled
-        self._active = threading.Event()
+        self.policy = VoicePolicy()
+        self._want_voice = voice
+        self._rate = rate
+        self._queue: queue.Queue[tuple[Cue, bool]] = queue.Queue(maxsize=2)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        if enabled:
+            self._thread.start()
 
-    def set(self, on: bool) -> None:
-        if on and self.enabled:
-            self._active.set()
-        else:
-            self._active.clear()
+    def update(self, reasons: list[str], t: float, urgent: bool, yawns: int | None = None) -> Cue | None:
+        """Feed the current reasons; queues a phrase when one is due. Returns the cue spoken."""
+        cue = self.policy.update(reasons, t, yawns)
+        if cue is not None and self.enabled:
+            try:
+                self._queue.put_nowait((cue, urgent))
+            except queue.Full:  # already behind: drop rather than talk about the past
+                pass
+        return cue
 
-    def _beep(self) -> None:
-        if sys.platform == "win32":
-            import winsound
+    def reset(self) -> None:
+        self.policy.reset()
 
-            winsound.Beep(1800, 180)
-            winsound.Beep(1400, 180)
-        else:
-            sys.stdout.write("\a")
-            sys.stdout.flush()
-            time.sleep(0.36)
+    def _engine(self):
+        if not self._want_voice:
+            return None
+        try:
+            import pyttsx3
+
+            engine = pyttsx3.init()
+            engine.setProperty("rate", self._rate)
+            return engine
+        except Exception:  # no pyttsx3, or no speech engine on this machine
+            return None
 
     def _run(self) -> None:
+        engine = self._engine()  # SAPI objects must live on the thread that uses them
         while not self._stop.is_set():
-            if self._active.wait(timeout=0.1):
-                self._beep()
-                time.sleep(0.15)
+            try:
+                cue, urgent = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if engine is not None:
+                try:
+                    engine.say(cue.phrase)
+                    engine.runAndWait()
+                    continue
+                except Exception:
+                    engine = None
+            beep(urgent)
 
     def close(self) -> None:
         self._stop.set()
-        self._active.clear()

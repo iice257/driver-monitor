@@ -1,0 +1,79 @@
+"""What each alert reason is called out loud and on screen, and when it is (re)spoken.
+
+The state machine reports reasons such as "Eyes closed 1.4s" or "Fatigue: 3 yawns".
+This module turns them into a short phrase ("Eyes closed. Wake up!") and a headline
+for the on-screen banner, and rate-limits the phrases so a held condition repeats at a
+steady pace instead of every frame. It is pure Python with explicit timestamps, so the
+same policy drives the live alarm, the offline reel renderer and the unit tests.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Cue:
+    key: str        # stable id for rate limiting
+    headline: str   # on-screen banner text
+    phrase: str     # what the voice says
+    repeat_s: float  # while the condition holds, say it again after this long
+
+
+# Matched by prefix against the state machine's reasons, most specific first.
+CUES: tuple[tuple[str, Cue], ...] = (
+    ("Eyes closed", Cue("eyes", "EYES CLOSED", "Eyes closed. Wake up!", 4.0)),
+    ("Phone call", Cue("call", "PHONE CALL DETECTED", "Phone call detected", 8.0)),
+    ("Phone in use", Cue("phone", "PHONE DETECTED", "Phone detected", 8.0)),
+    ("Eyes off road", Cue("away", "EYES OFF THE ROAD", "Eyes off the road", 5.0)),
+    ("Driver not visible", Cue("absent", "DRIVER NOT VISIBLE", "Driver not visible", 10.0)),
+    ("Fatigue", Cue("fatigue", "FATIGUE DETECTED", "Fatigue detected. Take a break", 30.0)),
+    ("Yawn", Cue("yawn", "YAWNING DETECTED", "Yawning detected", 30.0)),
+)
+
+
+def cue_for(reason: str) -> Cue | None:
+    for prefix, cue in CUES:
+        if reason.startswith(prefix):
+            return cue
+    return None
+
+
+@dataclass
+class VoicePolicy:
+    """Decides which phrase, if any, to speak now.
+
+    A cue is spoken when its reason first appears (unless the same cue was spoken less
+    than `min_gap_s` ago) and again every `repeat_s` while it holds. At most one phrase
+    is returned per update, in the state machine's priority order; a cue that loses out
+    stays pending and is spoken on a later update. Passing the running yawn count makes
+    every new yawn its own announcement, even while the "Yawn" reason is still showing.
+    """
+
+    min_gap_s: float = 2.5
+    _last: dict[str, float] = field(default_factory=dict)
+    _spoken: set[str] = field(default_factory=set)  # cues already announced in their current episode
+    _yawns: int = 0
+
+    def update(self, reasons: list[str], t: float, yawns: int | None = None) -> Cue | None:
+        active = [c for c in (cue_for(r) for r in reasons) if c is not None]
+        keys = {c.key for c in active}
+        self._spoken &= keys  # a cue that ended starts a fresh episode next time
+        if yawns is not None:
+            if yawns > self._yawns:
+                self._spoken.discard("yawn")
+            self._yawns = yawns
+        for cue in active:
+            last = self._last.get(cue.key)
+            since = float("inf") if last is None else t - last
+            due = since >= cue.repeat_s if cue.key in self._spoken else since >= self.min_gap_s
+            if due:
+                self._last[cue.key] = t
+                self._spoken.add(cue.key)
+                return cue
+        return None
+
+    def reset(self) -> None:
+        self._last.clear()
+        self._spoken.clear()
+        self._yawns = 0

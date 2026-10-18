@@ -1,0 +1,5 @@
+[
+  {"label": "Microsleep", "start": 0.0, "end": 10.01, "expect": "Eyes stay shut while the head droops: 'Eyes closed' alert after 1.2 s"},
+  {"label": "Repeated yawning", "start": 10.01, "end": 20.01, "expect": "Each yawn is noted, the squint isn't a microsleep, three yawns flag fatigue"},
+  {"label": "Looking away", "start": 20.01, "end": 30.02, "expect": "Head turns to the side window for more than 2 s: 'Eyes off the road' alert, cleared on return"}
+]
