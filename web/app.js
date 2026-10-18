@@ -37,33 +37,73 @@ function readSoundPref() {
   try { return localStorage.getItem("dm-sound") !== "off"; } catch { return true; }
 }
 
+// Pre-rendered neural voice (driver_monitor/voice.py) for every phrase it still matches;
+// the browser's own speech, a female English voice where there is one, for anything else.
+let clips = {};
+let playing = null, queued = null;
+async function loadVoice() {
+  const manifest = await fetch("/voice/manifest.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+  for (const [key, phrase] of Object.entries(manifest)) {
+    const a = new Audio(`/voice/${key}.mp3`);
+    a.preload = "auto";
+    a.addEventListener("ended", () => {
+      playing = null;
+      if (queued) playClip(...queued.splice(0));
+    });
+    clips[key] = { audio: a, phrase };
+  }
+}
+
+function playClip(audio) {
+  queued = null;
+  playing = audio;
+  audio.currentTime = 0;
+  audio.play().catch(() => (playing = null));
+}
+
 let speaker = null;
 function pickVoice() {
-  const voices = window.speechSynthesis?.getVoices() || [];
-  speaker = voices.find((v) => /^en(-|_)(US|GB)/i.test(v.lang) && /natural|online|google/i.test(v.name))
-    || voices.find((v) => /^en/i.test(v.lang)) || null;
+  const en = (window.speechSynthesis?.getVoices() || []).filter((v) => /^en/i.test(v.lang));
+  const female = /aria|jenny|ava|emma|michelle|sonia|libby|zira|samantha|serena|karen|moira|google us english|female/i;
+  speaker = en.find((v) => female.test(v.name) && /natural|online|neural|google/i.test(v.name))
+    || en.find((v) => female.test(v.name)) || en[0] || null;
 }
 if ("speechSynthesis" in window) {
   pickVoice();
   speechSynthesis.addEventListener?.("voiceschanged", pickVoice);
 }
 
+// An urgent alert interrupts; a caution waits behind the current phrase (one deep).
 function say(cue, urgent) {
-  if (!soundOn || !("speechSynthesis" in window)) return;
+  if (!soundOn) return;
+  const clip = clips[cue.key];
+  if (clip && clip.phrase === cue.phrase) {
+    if (playing && !playing.paused) {
+      if (!urgent) return void (queued = [clip.audio]);
+      playing.pause();
+    }
+    return playClip(clip.audio);
+  }
+  if (!("speechSynthesis" in window)) return;
   const u = new SpeechSynthesisUtterance(cue.phrase);
   if (speaker) u.voice = speaker;
-  u.rate = 1.05;
-  u.volume = 1;
-  // An urgent alert interrupts; a caution queues behind the current phrase (one deep).
+  u.rate = 1.0;
   if (urgent) speechSynthesis.cancel();
   else if (speechSynthesis.pending) return;
   speechSynthesis.speak(u);
 }
 
+function hush() {
+  queued = null;
+  playing?.pause();
+  playing = null;
+  window.speechSynthesis?.cancel();
+}
+
 function setSound(on) {
   soundOn = on;
   try { localStorage.setItem("dm-sound", on ? "on" : "off"); } catch {}
-  if (!on) window.speechSynthesis?.cancel();
+  if (!on) hush();
   video.muted = !on || mode !== "demo";
   const btn = $("sound");
   btn.classList.toggle("is-off", !on);
@@ -190,7 +230,7 @@ function resetState() {
   phone = { t: -1, phones: [], hands: [] };
   lastKey = "";
   voice.reset();
-  window.speechSynthesis?.cancel();
+  hush();
 }
 
 // ---- chapters (demo reel) ---------------------------------------------------
@@ -521,7 +561,7 @@ window.addEventListener("keydown", (e) => {
 buildPanel();
 setSound(soundOn);
 veil({ text: "Loading the face model, about 4 MB", busy: true });
-Promise.all([loadModels(), loadChapters()])
+Promise.all([loadModels(), loadChapters(), loadVoice()])
   .then(() => {
     const wanted = new URLSearchParams(location.search).get("mode");
     if (wanted === "camera") document.querySelector('[data-mode="camera"]').click();

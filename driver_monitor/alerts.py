@@ -22,13 +22,13 @@ class Cue:
 
 # Matched by prefix against the state machine's reasons, most specific first.
 CUES: tuple[tuple[str, Cue], ...] = (
-    ("Eyes closed", Cue("eyes", "EYES CLOSED", "Eyes closed. Wake up!", 4.0)),
-    ("Phone call", Cue("call", "PHONE CALL DETECTED", "Phone call detected", 8.0)),
-    ("Phone in use", Cue("phone", "PHONE DETECTED", "Phone detected", 8.0)),
-    ("Eyes off road", Cue("away", "EYES OFF THE ROAD", "Eyes off the road", 5.0)),
-    ("Driver not visible", Cue("absent", "DRIVER NOT VISIBLE", "Driver not visible", 10.0)),
-    ("Fatigue", Cue("fatigue", "FATIGUE DETECTED", "Fatigue detected. Take a break", 30.0)),
-    ("Yawn", Cue("yawn", "YAWNING DETECTED", "Yawning detected", 30.0)),
+    ("Eyes closed", Cue("eyes", "EYES CLOSED", "Eyes closed, please stay awake.", 4.0)),
+    ("Phone call", Cue("call", "PHONE CALL DETECTED", "Phone call detected, please keep your eyes on the road.", 8.0)),
+    ("Phone in use", Cue("phone", "PHONE DETECTED", "Phone detected, please put your phone away.", 8.0)),
+    ("Eyes off road", Cue("away", "DRIVER DISTRACTED", "Driver distracted, please focus on the road.", 5.0)),
+    ("Driver not visible", Cue("absent", "DRIVER NOT VISIBLE", "Driver not visible, please pay attention.", 10.0)),
+    ("Fatigue", Cue("fatigue", "FATIGUE DETECTED", "Fatigue detected, please take a break soon.", 30.0)),
+    ("Yawn", Cue("yawn", "YAWNING DETECTED", "Yawning detected, please drive carefully.", 30.0)),
 )
 
 

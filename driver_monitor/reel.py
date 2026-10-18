@@ -3,11 +3,12 @@
     python -m driver_monitor.reel samples/scenarios.json
 
 Writes, next to the scenarios file:
-  reel.mp4      the clips joined in scenario order, original sound kept. The web demo
-                analyses this one live, so it carries no overlay.
+  reel.mp4      the clips as one continuous drive: dissolves at the cuts and a single
+                uniform cabin ambience underneath. The web demo analyses this one live,
+                so it carries no overlay.
   showcase.mp4  the same reel run through the monitor: HUD, alert banner and flashing
-                border drawn on every frame, and each alert spoken (offline TTS) over
-                the original sound, exactly when the live alarm would say it.
+                border drawn on every frame, and each alert spoken in the pre-rendered
+                voice (voice.py) over the ambience, exactly when the live alarm would.
 
 With --web DIR it also refreshes DIR/reel.mp4, DIR/showcase.mp4, DIR/poster.jpg and
 DIR/chapters.json for the static site. Phone detection is off, as in evaluate.py.
@@ -26,10 +27,11 @@ from pathlib import Path
 import cv2
 
 from . import hud
-from .alerts import VoicePolicy
+from .alerts import CUES, VoicePolicy
 from .detector import DEFAULT_MODEL, FaceTracker
 from .evaluate import DEFAULT_CONFIG
 from .state import Config, DriverState, Frame
+from .voice import clip_for
 
 W, H, FPS, RATE = 1280, 720, 30, 48000
 
@@ -48,22 +50,51 @@ def probe(path: Path) -> tuple[float, bool]:
     return float(info["format"]["duration"]), has_audio
 
 
-def join(clips: list[Path], out: Path) -> list[float]:
-    """Concatenate with re-encode, video and audio together. Returns each clip's start time."""
-    inputs, chains, pads, starts, t = [], [], [], [], 0.0
+def join(clips: list[Path], out: Path, ambience: Path, xfade: float = 0.5) -> list[float]:
+    """Join the clips into one continuous take; returns where each scenario starts.
+
+    Picture: a short dissolve at every cut. Every clip opens on the same reference frame,
+    so the dissolve reads as the same drive rather than a new shot.
+    Sound: one uniform cabin ambience under the whole reel instead of each clip's own
+    track, which differ in level and timbre and give the cuts away. The ambience clip's
+    sound is looped with long crossfades that fall between the cuts, then normalised.
+    """
+    durs = [probe(c)[0] for c in clips]
+    total = sum(durs) - xfade * (len(clips) - 1)
+    starts = [sum(durs[:i]) - xfade * i + (xfade / 2 if i else 0.0) for i in range(len(clips))]
+
+    inputs, chains = [], []
     for i, clip in enumerate(clips):
-        dur, has_audio = probe(clip)
         inputs += ["-i", str(clip)]
         chains.append(f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:-1:-1,"
-                      f"fps={FPS},setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}]")
-        src = f"[{i}:a]" if has_audio else f"anullsrc=r={RATE}:cl=stereo,"
-        chains.append(f"{src}aformat=sample_rates={RATE}:channel_layouts=stereo,"
-                      f"atrim=duration={dur},asetpts=PTS-STARTPTS[a{i}]")
-        pads.append(f"[v{i}][a{i}]")
-        starts.append(t)
-        t += dur
-    graph = ";".join(chains) + f";{''.join(pads)}concat=n={len(clips)}:v=1:a=1[v][a]"
-    ffmpeg(*inputs, "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
+                      f"fps={FPS},setsar=1,format=yuv420p,trim=duration={durs[i]},setpts=PTS-STARTPTS[v{i}]")
+    last, offset = "[v0]", 0.0
+    for i in range(1, len(clips)):
+        offset += durs[i - 1] - xfade
+        chains.append(f"{last}[v{i}]xfade=transition=fade:duration={xfade}:offset={offset:.3f}[x{i}]")
+        last = f"[x{i}]"
+
+    # Ambience bed: overlapping copies of one clip's sound, 3 s equal-power crossfades.
+    amb_dur, has_audio = probe(ambience)
+    if not has_audio:
+        raise SystemExit(f"{ambience} has no sound to use as ambience")
+    seg, overlap = amb_dur - 0.4, 3.0
+    copies = 1
+    while copies * seg - (copies - 1) * overlap < total + 1:
+        copies += 1
+    a0 = len(clips)
+    for k in range(copies):
+        inputs += ["-i", str(ambience)]
+        chains.append(f"[{a0 + k}:a]aformat=sample_rates={RATE}:channel_layouts=stereo,"
+                      f"atrim=start=0.2:duration={seg},asetpts=PTS-STARTPTS[b{k}]")
+    bed = "[b0]"
+    for k in range(1, copies):
+        chains.append(f"{bed}[b{k}]acrossfade=d={overlap}:c1=qsin:c2=qsin[bx{k}]")
+        bed = f"[bx{k}]"
+    chains.append(f"{bed}atrim=duration={total},asetpts=PTS-STARTPTS,loudnorm=I=-30:LRA=4:TP=-6,"
+                  f"aresample={RATE},afade=t=in:d=0.6,afade=t=out:st={total - 1.0:.3f}:d=1.0[a]")
+
+    ffmpeg(*inputs, "-filter_complex", ";".join(chains), "-map", last, "-map", "[a]",
            "-c:v", "libx264", "-crf", "22", "-preset", "slow", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out))
     return starts
@@ -108,15 +139,24 @@ def annotate(reel: Path, out: Path, cuts: list[float], cfg: Config, model: Path)
 
 
 def synthesize(phrases: set[str], folder: Path, rate: int = 185) -> dict[str, Path]:
-    import pyttsx3
+    """A WAV per phrase: the pre-rendered neural voice clip, or system TTS if it is stale."""
+    by_phrase = {cue.phrase: cue for _, cue in CUES}
+    files, missing = {}, []
+    for phrase in sorted(phrases):
+        clip = clip_for(by_phrase[phrase]) if phrase in by_phrase else None
+        if clip is not None:
+            files[phrase] = clip
+        else:
+            missing.append(phrase)
+    if missing:
+        import pyttsx3
 
-    engine = pyttsx3.init()
-    engine.setProperty("rate", rate)
-    files = {}
-    for i, phrase in enumerate(sorted(phrases)):
-        files[phrase] = folder / f"say{i}.wav"
-        engine.save_to_file(phrase, str(files[phrase]))
-    engine.runAndWait()
+        engine = pyttsx3.init()
+        engine.setProperty("rate", rate)
+        for i, phrase in enumerate(missing):
+            files[phrase] = folder / f"say{i}.wav"
+            engine.save_to_file(phrase, str(files[phrase]))
+        engine.runAndWait()
     return files
 
 
@@ -128,7 +168,7 @@ def wav_seconds(path: Path) -> float:
 def mix(video: Path, reel: Path, said: list[tuple[float, str]], voices: dict[str, Path], out: Path) -> list[tuple[float, str]]:
     """Mux the annotated video with the reel's sound, ducked, plus each phrase at its time."""
     inputs = ["-i", str(video), "-i", str(reel)]
-    chains = [f"[1:a]volume=0.45[bed]"]
+    chains = [f"[1:a]volume=0.7[bed]"]
     labels, placed, free_at = ["[bed]"], [], 0.0
     for i, (t, phrase) in enumerate(said):
         at = max(t, free_at)  # one voice: never talk over the previous phrase
@@ -152,6 +192,8 @@ def main() -> None:
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     p.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     p.add_argument("--web", type=Path, help="also refresh the static site's demo folder, e.g. web/demo")
+    p.add_argument("--ambience", default=None, help="clip whose sound becomes the reel's ambience (default: the first)")
+    p.add_argument("--xfade", type=float, default=0.5, help="dissolve between scenarios, seconds")
     args = p.parse_args()
 
     folder = args.spec.parent
@@ -159,9 +201,10 @@ def main() -> None:
     clips = [folder / sc["clip"] for sc in scenarios]
     reel, showcase = folder / "reel.mp4", folder / "showcase.mp4"
 
-    starts = join(clips, reel)
+    ambience = folder / args.ambience if args.ambience else clips[0]
+    starts = join(clips, reel, ambience, args.xfade)
     total, _ = probe(reel)
-    print(f"reel.mp4      {total:.1f}s, {len(clips)} scenarios with sound")
+    print(f"reel.mp4      {total:.1f}s, {len(clips)} scenarios, one ambience track ({ambience.name})")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)

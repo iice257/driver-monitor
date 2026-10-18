@@ -1,0 +1,9 @@
+{
+  "eyes": "Eyes closed, please stay awake.",
+  "call": "Phone call detected, please keep your eyes on the road.",
+  "phone": "Phone detected, please put your phone away.",
+  "away": "Driver distracted, please focus on the road.",
+  "absent": "Driver not visible, please pay attention.",
+  "fatigue": "Fatigue detected, please take a break soon.",
+  "yawn": "Yawning detected, please drive carefully."
+}

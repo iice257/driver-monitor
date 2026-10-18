@@ -1,9 +1,12 @@
 """Non-blocking spoken alarm.
 
-Alerts are read out with offline text-to-speech (pyttsx3: SAPI5 on Windows, NSSpeech on
-macOS, eSpeak on Linux) on a background thread, so the video loop never waits for the
-voice. VoicePolicy decides what to say and how often. If no TTS engine is available the
-alarm falls back to beeps: winsound on Windows, the terminal bell elsewhere.
+Alerts are spoken on a background thread, so the video loop never waits for the voice,
+and VoicePolicy decides what to say and how often. The voice, best first:
+  1. the pre-rendered neural voice clips in driver_monitor/voice (see voice.py), played
+     offline with winsound on Windows;
+  2. system text-to-speech via pyttsx3 (SAPI5 / NSSpeech / eSpeak), a female voice if
+     one is installed;
+  3. beeps: winsound on Windows, the terminal bell elsewhere.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import threading
 import time
 
 from .alerts import Cue, VoicePolicy
+from .voice import clip_for
 
 
 def beep(urgent: bool = True) -> None:
@@ -62,9 +66,25 @@ class Alarm:
 
             engine = pyttsx3.init()
             engine.setProperty("rate", self._rate)
+            female = [v for v in engine.getProperty("voices")
+                      if "female" in str(getattr(v, "gender", "")).lower() or "zira" in v.name.lower()]
+            if female:
+                engine.setProperty("voice", female[0].id)
             return engine
         except Exception:  # no pyttsx3, or no speech engine on this machine
             return None
+
+    def _play_clip(self, cue: Cue) -> bool:
+        clip = clip_for(cue) if self._want_voice and sys.platform == "win32" else None
+        if clip is None:
+            return False
+        import winsound
+
+        try:
+            winsound.PlaySound(str(clip), winsound.SND_FILENAME)
+            return True
+        except RuntimeError:
+            return False
 
     def _run(self) -> None:
         engine = self._engine()  # SAPI objects must live on the thread that uses them
@@ -72,6 +92,8 @@ class Alarm:
             try:
                 cue, urgent = self._queue.get(timeout=0.1)
             except queue.Empty:
+                continue
+            if self._play_clip(cue):
                 continue
             if engine is not None:
                 try:

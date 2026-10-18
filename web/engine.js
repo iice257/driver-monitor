@@ -321,13 +321,13 @@ export class DriverState {
 
 // Matched by prefix against DriverState reasons, most specific first.
 export const CUES = [
-  ["Eyes closed", { key: "eyes", headline: "Eyes closed", phrase: "Eyes closed. Wake up!", repeatS: 4 }],
-  ["Phone call", { key: "call", headline: "Phone call detected", phrase: "Phone call detected", repeatS: 8 }],
-  ["Phone in use", { key: "phone", headline: "Phone detected", phrase: "Phone detected", repeatS: 8 }],
-  ["Eyes off road", { key: "away", headline: "Eyes off the road", phrase: "Eyes off the road", repeatS: 5 }],
-  ["Driver not visible", { key: "absent", headline: "Driver not visible", phrase: "Driver not visible", repeatS: 10 }],
-  ["Fatigue", { key: "fatigue", headline: "Fatigue detected", phrase: "Fatigue detected. Take a break", repeatS: 30 }],
-  ["Yawn", { key: "yawn", headline: "Yawning detected", phrase: "Yawning detected", repeatS: 30 }],
+  ["Eyes closed", { key: "eyes", headline: "Eyes closed", phrase: "Eyes closed, please stay awake.", repeatS: 4 }],
+  ["Phone call", { key: "call", headline: "Phone call detected", phrase: "Phone call detected, please keep your eyes on the road.", repeatS: 8 }],
+  ["Phone in use", { key: "phone", headline: "Phone detected", phrase: "Phone detected, please put your phone away.", repeatS: 8 }],
+  ["Eyes off road", { key: "away", headline: "Driver distracted", phrase: "Driver distracted, please focus on the road.", repeatS: 5 }],
+  ["Driver not visible", { key: "absent", headline: "Driver not visible", phrase: "Driver not visible, please pay attention.", repeatS: 10 }],
+  ["Fatigue", { key: "fatigue", headline: "Fatigue detected", phrase: "Fatigue detected, please take a break soon.", repeatS: 30 }],
+  ["Yawn", { key: "yawn", headline: "Yawning detected", phrase: "Yawning detected, please drive carefully.", repeatS: 30 }],
 ];
 
 export function cueFor(reason) {

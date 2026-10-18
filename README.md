@@ -20,7 +20,7 @@ Every threshold lives in [`config.toml`](config.toml), so you can tune it for yo
 
 ### Alerts you can hear and see
 
-Each alert is spoken by name with offline text-to-speech (pyttsx3: SAPI5 on Windows), on a background thread so the video never stalls: "Eyes closed. Wake up!", "Yawning detected", "Eyes off the road", "Phone detected", "Phone call detected", "Fatigue detected. Take a break". A phrase is said when its condition starts and repeated at a steady pace while it holds (every 4 s for eyes closed), never every frame. Without a speech engine, or with `--beep`, it falls back to beeps.
+Each alert names the problem, then asks the driver to act: "Yawning detected, please drive carefully.", "Driver distracted, please focus on the road.", "Eyes closed, please stay awake.", "Phone detected, please put your phone away.", "Fatigue detected, please take a break soon.". The voice is a natural neural female voice (Microsoft's Ava), pre-rendered once by `python -m driver_monitor.voice` and committed, so playback is offline and runs on a background thread that never stalls the video. If a phrase is edited without re-rendering, or on a machine without the clips, it falls back to system text-to-speech (pyttsx3, a female voice where installed), then to beeps (`--beep` forces beeps). A phrase is said when its condition starts and repeated at a steady pace while it holds (every 4 s for eyes closed), never every frame.
 
 On screen, the preview shows a banner naming the reason (red for ALERT, amber for caution) and the frame border flashes. The web demo does the same with the browser's `speechSynthesis` and a matching banner and border pulse; the speaker button mutes it.
 
@@ -89,7 +89,7 @@ python -m driver_monitor.evaluate samples/scenarios.json         # each clip rai
 python -m driver_monitor.reel samples/scenarios.json --web web/demo
 ```
 
-`reel` joins the clips in scenario order with their sound (`reel.mp4`, which the web demo analyses live), and renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the original audio. `--web` also refreshes the site's poster and chapter list.
+`reel` joins the clips in scenario order as one continuous drive (`reel.mp4`, which the web demo analyses live). Each cut is a short dissolve, and a single uniform cabin ambience runs underneath, looped from one clip with crossfades away from the cuts. It also renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the ambience. `--web` also refreshes the site's poster and chapter list.
 
 ## Tests
 
@@ -108,7 +108,8 @@ driver_monitor/
   state.py          temporal logic, calibration, alert levels
   hud.py            overlay rendering, alert banner and border flash
   alerts.py         spoken phrase and banner text per reason, and when to repeat them
-  alarm.py          spoken alerts (offline TTS) on a background thread, beep fallback
+  alarm.py          spoken alerts on a background thread: voice clips, system TTS, then beeps
+  voice.py          renders the alert phrases in a neural voice (driver_monitor/voice, web/voice)
   evaluate.py       scenario checks against the sample clips
   reel.py           builds the demo reel and the annotated showcase video
   __main__.py       CLI
