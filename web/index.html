@@ -7,7 +7,7 @@
   <meta name="description" content="Drowsiness and distraction detection that runs in your browser. Watch it on an AI-generated test reel, or try it on your own camera." />
   <meta name="theme-color" content="#0b0b0c" />
   <meta property="og:title" content="Driver Monitor" />
-  <meta property="og:description" content="A webcam that can tell a blink from a microsleep. Runs entirely in your browser." />
+  <meta property="og:description" content="Drowsiness and distraction alerts from a webcam. Runs entirely in your browser." />
   <meta property="og:image" content="/demo/poster.jpg" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -28,8 +28,8 @@
   <main class="shell">
     <section class="intro">
       <div>
-        <h1>Tells a blink from a microsleep.</h1>
-        <p class="lede">Face landmarks, head pose and gaze run live in this tab, and an alert fires only when a condition lasts long enough to matter.</p>
+        <h1>Detects drowsy and distracted driving.</h1>
+        <p class="lede">Watches your eyes, head and gaze through a webcam and speaks up when you nod off, keep yawning or look away from the road. Runs entirely in this tab.</p>
       </div>
       <div class="modes" role="tablist" aria-label="Input">
         <button class="mode is-active" role="tab" aria-selected="true" data-mode="demo">Test reel</button>
@@ -53,6 +53,10 @@
           <button class="sound-btn" id="sound" type="button" aria-pressed="true" aria-label="Mute alerts and reel sound">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path class="cross" d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           </button>
+          <div class="view-toggle" role="radiogroup" aria-label="Face overlay">
+            <button type="button" role="radio" aria-checked="true" data-view="light" title="Eye and mouth outlines only">Light</button>
+            <button type="button" role="radio" aria-checked="false" data-view="mesh" title="All 478 face landmarks">Mesh</button>
+          </div>
           <div class="veil" id="veil">
             <div class="veil-inner">
               <div class="spinner" aria-hidden="true"></div>
@@ -100,9 +104,9 @@
     </section>
 
     <section class="notes">
-      <p><strong>Private by design.</strong> Everything runs on your device with MediaPipe. No frame leaves this page.</p>
+      <p><strong>Nothing is uploaded.</strong> The models run on your device with MediaPipe, so camera frames never leave this page.</p>
       <p><strong>About the reel.</strong> The driver footage is AI-generated from one reference image, so no real person is on camera. Each scenario recalibrates at its cut, as a new driver would. <a href="/demo/showcase.mp4" target="_blank" rel="noopener">Watch the recorded run</a> with the desktop app's overlay and voice.</p>
-      <p><strong>Camera tips.</strong> Hold your normal driving pose for the first three seconds while it learns your baseline, then try closing your eyes, yawning or looking away. Alerts are spoken aloud; mute them with the speaker button.</p>
+      <p><strong>Camera tips.</strong> Sit as you normally would for the first three seconds so it can learn your baseline, then try closing your eyes, yawning or looking away. Alerts are spoken aloud; mute them with the speaker button.</p>
     </section>
   </main>
 

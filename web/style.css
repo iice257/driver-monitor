@@ -101,6 +101,17 @@ h1 { font-size: clamp(30px, 4.4vw, 52px); line-height: 1.04; letter-spacing: -0.
 .sound-btn.is-off .wave { display: none; }
 .sound-btn.is-off .cross { display: block; }
 
+.view-toggle {
+  position: absolute; top: 12px; right: 12px; display: inline-flex; padding: 3px; gap: 2px;
+  border-radius: 999px; background: rgba(20, 20, 22, 0.6); backdrop-filter: blur(8px); border: 1px solid var(--line-strong);
+}
+.view-toggle button {
+  border: 0; background: transparent; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--fg-2); transition: background 0.2s, color 0.2s;
+}
+.view-toggle button:hover { color: var(--fg); }
+.view-toggle button[aria-checked="true"] { background: var(--fg); color: var(--bg); }
+
 .veil {
   position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
   background: rgba(8, 8, 9, 0.72); backdrop-filter: blur(6px); transition: opacity 0.3s;

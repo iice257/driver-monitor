@@ -30,6 +30,7 @@ let fps = 0, lastFrameAt = 0, lastUi = 0;
 let running = false;
 const voice = new VoicePolicy();
 let soundOn = readSoundPref();
+let view = readPref("dm-view", "light"); // "light": outlines only, "mesh": every landmark as a dot
 
 // ---- sound: reel audio plus spoken alerts ------------------------------------
 
@@ -336,6 +337,21 @@ function tick() {
 
 // ---- drawing ----------------------------------------------------------------
 
+function readPref(key, fallback) {
+  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+}
+
+function setView(v) {
+  view = v;
+  for (const b of document.querySelectorAll(".view-toggle [data-view]")) b.setAttribute("aria-checked", String(b.dataset.view === v));
+  try { localStorage.setItem("dm-view", v); } catch {}
+}
+document.querySelector(".view-toggle").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-view]");
+  if (b) setView(b.dataset.view);
+});
+setView(view);
+
 const COLORS = { ok: "#5fd08a", warn: "#f5b546", alert: "#ef4444", line: "rgba(255,255,255,0.85)", soft: "rgba(255,255,255,0.35)" };
 
 function path(points, idx) {
@@ -381,6 +397,18 @@ function draw(r, s, ph) {
     ctx.lineTo(cx, cy);
     ctx.lineTo(cx, cy + dy * len);
     ctx.stroke();
+  }
+
+  if (view === "mesh") {
+    // Every landmark as a dot, tinted by the current level; one path keeps it cheap.
+    const rad = 1.6 * u;
+    ctx.fillStyle = s.level === Level.ALERT ? "rgba(239,68,68,0.9)" : s.level === Level.WARN ? "rgba(245,181,70,0.9)" : "rgba(95,208,138,0.9)";
+    ctx.beginPath();
+    for (const [px, py] of r.points) {
+      ctx.moveTo(px + rad, py);
+      ctx.arc(px, py, rad, 0, Math.PI * 2);
+    }
+    ctx.fill();
   }
 
   ctx.lineWidth = 1.5 * u;
