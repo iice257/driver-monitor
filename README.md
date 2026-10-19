@@ -91,6 +91,20 @@ python -m driver_monitor.reel samples/scenarios.json         # writes web/demo/{
 
 `reel` joins the clips in scenario order as one continuous drive (`reel.mp4`, which the web demo analyses live). Each cut is a short dissolve, and a single uniform cabin ambience runs underneath, looped from one clip with crossfades away from the cuts. It also renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the ambience. The videos live only in `web/demo`; `samples/` holds the source clips.
 
+## Models and versions
+
+The desktop app and the web demo run the same model files, so they see the same things.
+
+| Job | File | Where it comes from |
+|---|---|---|
+| Face landmarks + blendshapes | `face_landmarker.task` (float16) | MediaPipe model storage, `face_landmarker/float16/latest` |
+| Phone detector | `efficientdet_lite0.tflite` (float16, COCO `cell phone`, score ≥ 0.35) | `object_detector/efficientdet_lite0/float16/latest` |
+| Hand landmarks | `hand_landmarker.task` (float16) | `hand_landmarker/float16/latest` |
+
+Lite0 on both sides: Lite2 is 23 MB, too heavy to ship to a browser tab for a small accuracy gain. The desktop copies live in `models/` (fetched by `python -m driver_monitor.download_model`), the web copies in `web/models/`, and a test checks both lists agree.
+
+Runtimes: Python `mediapipe==1.1.1`, browser `@mediapipe/tasks-vision` **0.10.14**, self-hosted under `web/vendor/` (pinned, Apache-2.0, no CDN at runtime). The page shows real download progress, falls back from GPU to CPU if GPU start-up fails or takes over 5 s, and offers a retry if loading stalls.
+
 ## Tests
 
 ```bash

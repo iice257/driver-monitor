@@ -5,7 +5,7 @@ thread over the most recent frame. The main loop never waits for them; it reads
 whatever the latest result is and how old it is.
 
 Backends:
-  mediapipe (default)  EfficientDet-Lite2 (COCO "cell phone") + HandLandmarker.
+  mediapipe (default)  EfficientDet-Lite0 (float16) (COCO "cell phone") + HandLandmarker.
   yolo                 Ultralytics YOLO, if installed (pip install ultralytics).
                        Note that Ultralytics is AGPL-3.0 licensed.
 """
@@ -24,10 +24,10 @@ from mediapipe.tasks.python import BaseOptions, vision
 
 from .detector import MODELS_DIR
 
-OBJECT_MODEL = MODELS_DIR / "efficientdet_lite2.tflite"
+OBJECT_MODEL = MODELS_DIR / "efficientdet_lite0.tflite"
 OBJECT_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/object_detector/"
-    "efficientdet_lite2/float32/latest/efficientdet_lite2.tflite"
+    "efficientdet_lite0/float16/latest/efficientdet_lite0.tflite"
 )
 HAND_MODEL = MODELS_DIR / "hand_landmarker.task"
 HAND_MODEL_URL = (
@@ -136,7 +136,7 @@ class _YoloBackend:
 class PhoneWatcher:
     """Runs the phone/hand models on a background thread over the latest frame."""
 
-    def __init__(self, backend: str = "mediapipe", score: float = 0.3) -> None:
+    def __init__(self, backend: str = "mediapipe", score: float = 0.35) -> None:
         self.error: str | None = None   # set once if the backend fails; the watcher then idles
         self._backend = None
         try:

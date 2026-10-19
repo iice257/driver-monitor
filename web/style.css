@@ -121,6 +121,10 @@ h1 { font-size: clamp(30px, 4.4vw, 52px); line-height: 1.04; letter-spacing: -0.
 .veil p { margin: 0; color: var(--fg-2); max-width: 36ch; }
 .spinner { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--fg); animation: spin 0.9s linear infinite; }
 .veil.is-idle .spinner { display: none; }
+.veil-progress { display: grid; gap: 8px; width: min(280px, 70vw); justify-items: center; }
+.veil-track { width: 100%; height: 4px; border-radius: 2px; background: var(--line-strong); overflow: hidden; }
+.veil-track i { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--fg); transition: width 0.2s ease-out; }
+.veil .veil-detail { margin: 0; font: 400 12px/1.4 var(--mono); color: var(--fg-3); font-variant-numeric: tabular-nums; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .primary {
   border: 0; background: var(--fg); color: var(--bg); font-weight: 600; font-size: 14px;

@@ -163,15 +163,58 @@ function setSound(on) {
 let worker = null, phoneWorker = null, phoneReady = false, busy = false, phoneBusy = false, nextId = 0, inflight = null;
 let phoneJob = null;
 
+// Real download progress: each worker announces the files it will fetch (with their sizes) and
+// reports bytes as they arrive. Only the face pipeline blocks the start; phone models follow.
+const MB = 1048576;
+const dl = { plan: new Map(), got: new Map() };
+function onProgress(d) {
+  if (d.type === "plan") {
+    if (d.role === "face") for (const a of d.assets) dl.plan.set(a.key, a);
+  } else if (d.type === "progress" && d.role === "face") {
+    dl.got.set(d.key, d.loaded);
+    showLoad();
+  }
+}
+
+function showLoad() {
+  let total = 0, loaded = 0, current = null;
+  for (const [k, a] of dl.plan) {
+    total += a.bytes;
+    const got = dl.got.get(k) || 0;
+    loaded += got;
+    if (got < a.bytes && !current) current = a;
+  }
+  if (!total) return;
+  const pct = Math.min(100, Math.round((loaded / total) * 100));
+  $("veil-progress").hidden = false;
+  $("veil-fill").style.width = `${pct}%`;
+  $("veil-bar").setAttribute("aria-valuenow", String(pct));
+  $("veil-text").textContent = current ? `Loading ${current.label.toLowerCase()}` : "Starting the face model";
+  $("veil-detail").textContent = `${(loaded / MB).toFixed(1)} of ${(total / MB).toFixed(1)} MB`;
+}
+
+const LOAD_TIMEOUT_MS = 20000;
+
 function loadModels() {
+  worker?.terminate();
+  phoneWorker?.terminate();
+  dl.plan.clear();
+  dl.got.clear();
+  phoneReady = false;
   return new Promise((resolve, reject) => {
+    // Fail only when nothing has moved for LOAD_TIMEOUT_MS: a slow link that keeps downloading is fine.
+    let timer;
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => reject(new Error("timeout")), LOAD_TIMEOUT_MS); };
+    const done = (fn, v) => { clearTimeout(timer); fn(v); };
+    arm();
     worker = new Worker("/worker.js");
-    worker.onerror = (e) => reject(new Error(e.message || "worker failed"));
+    worker.onerror = (e) => done(reject, new Error(e.message || "worker failed"));
     worker.onmessage = (e) => {
       const d = e.data;
-      if (d.type === "ready") resolve();
-      else if (d.type === "error") reject(new Error(d.message));
+      if (d.type === "ready") { engineDelegate = d.delegate; done(resolve); }
+      else if (d.type === "error") done(reject, new Error(d.message));
       else if (d.type === "result") onResult(d);
+      else { arm(); onProgress(d); }
     };
     worker.postMessage({ type: "init", role: "face" });
     // Phone evidence is optional and loads in its own worker: the face pipeline starts without it.
@@ -186,6 +229,7 @@ function loadModels() {
     phoneWorker.postMessage({ type: "init", role: "phone" });
   });
 }
+let engineDelegate = "GPU";
 
 // Phone evidence is a bonus: if its models fail, say so (HUD and log) instead of silently reading "No".
 let phoneBroken = false;
@@ -207,6 +251,7 @@ function veil({ text, action, busy = false } = {}) {
   }
   v.classList.remove("is-hidden");
   v.classList.toggle("is-idle", !busy);
+  if (!busy || text !== "Loading models") $("veil-progress").hidden = !(busy && dl.plan.size);
   $("veil-text").textContent = text;
   const btn = $("veil-action");
   btn.hidden = !action;
@@ -433,9 +478,9 @@ function onResult(d) {
   draw(reading, s, fresh ? phone : null);
   const p3 = performance.now();
   logState(s, t);
-  const d = voice.update(s.reasons, t, s.level === Level.ALERT, s.yawns); // live during calibration too
-  if (d.cue) say(d.cue, d.preempt);
-  siren(d.sirenHz);
+  const alarm = voice.update(s.reasons, t, s.level === Level.ALERT, s.yawns); // live during calibration too
+  if (alarm.cue) say(alarm.cue, alarm.preempt);
+  siren(alarm.sirenHz);
   if (done - lastUi > 66) {
     lastUi = done;
     renderPanel(reading, s, fresh ? phone : null);
@@ -703,8 +748,12 @@ window.addEventListener("keydown", (e) => {
 
 buildPanel();
 setSound(soundOn);
-veil({ text: "Loading the face model, about 4 MB", busy: true });
-Promise.all([loadModels(), loadChapters(), loadVoice()])
+function boot() {
+  veil({ text: "Loading models", busy: true });
+  return Promise.all([loadModels(), loadChapters(), loadVoice()]);
+}
+function start() {
+  boot()
   .then(() => {
     ready = true;
     const wanted = new URLSearchParams(location.search).get("mode");
@@ -717,5 +766,11 @@ Promise.all([loadModels(), loadChapters(), loadVoice()])
   })
   .catch((err) => {
     console.error(err);
-    veil({ text: "The models couldn't load. Check your connection and reload the page." });
+    const slow = err && err.message === "timeout";
+    veil({
+      text: slow ? "Loading is taking too long. Your connection may be slow." : "The models couldn't load.",
+      action: { label: "Try again", run: start },
+    });
   });
+}
+start();

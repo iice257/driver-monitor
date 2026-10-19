@@ -61,6 +61,10 @@
             <div class="veil-inner">
               <div class="spinner" aria-hidden="true"></div>
               <p id="veil-text">Loading models</p>
+              <div class="veil-progress" id="veil-progress" hidden>
+                <div class="veil-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="veil-bar"><i id="veil-fill"></i></div>
+                <p class="veil-detail" id="veil-detail"></p>
+              </div>
               <button class="primary" id="veil-action" hidden>Start</button>
             </div>
           </div>
@@ -105,7 +109,7 @@
 
     <section class="notes">
       <p><strong>Nothing is uploaded.</strong> The models run on your device with MediaPipe, so camera frames never leave this page.</p>
-      <p><strong>About the reel.</strong> The driver footage is AI-generated from one reference image, so no real person is on camera. Each scenario recalibrates at its cut, as a new driver would. <a href="/demo/showcase.mp4" target="_blank" rel="noopener">Watch the recorded run</a> with the desktop app's overlay and voice.</p>
+      <p><strong>About the reel.</strong> The driver footage is AI-generated from one reference image, so no real person is on camera. <a href="/demo/showcase.mp4" target="_blank" rel="noopener">Watch the recorded run</a> with the desktop app's overlay and voice.</p>
       <p><strong>Camera tips.</strong> Sit as you normally would for the first three seconds so it can learn your baseline, then try closing your eyes, yawning or looking away. Alerts are spoken aloud; mute them with the speaker button.</p>
     </section>
   </main>
