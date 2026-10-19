@@ -1,6 +1,6 @@
 import {
   DEFAULTS, DriverState, Level, LEFT_EYE_CONTOUR, LEFT_IRIS, MOUTH_CONTOUR, RIGHT_EYE_CONTOUR, RIGHT_IRIS,
-  VoicePolicy, cueFor, handAtEar, phoneNearFace, readFace,
+  AlarmPolicy, cueFor, handAtEar, phoneNearFace, readFace,
 } from "./engine.js";
 
 const PHONE_EVERY = 8; // phone and hand models run in their own worker on every Nth frame
@@ -25,7 +25,7 @@ let phone = { t: -1, phones: [], hands: [] };
 let lastKey = "";
 let fps = 0, lastFrameAt = 0, lastUi = 0;
 let running = false;
-const voice = new VoicePolicy();
+const voice = new AlarmPolicy();
 
 // ---- performance budget (open with ?perf) ------------------------------------
 // Per analysed frame, on the main thread: p95 under 16 ms in total and no task over 50 ms,
@@ -106,6 +106,37 @@ function say(cue, urgent) {
   speechSynthesis.speak(u);
 }
 
+// Closed eyes for 2 s after the first phrase: a loud two-tone alarm that speeds up until they open.
+let ac = null, sirenTimer = 0, sirenGain = null;
+function siren(hz) {
+  if (!soundOn || hz <= 0) {
+    if (sirenTimer) { clearTimeout(sirenTimer); sirenTimer = 0; }
+    return;
+  }
+  if (sirenTimer) return void (siren.hz = hz); // running: the next beat picks up the new rate
+  siren.hz = hz;
+  try {
+    ac ||= new AudioContext();
+    if (ac.state === "suspended") ac.resume();
+    sirenGain ||= ac.createGain(); // gain 1 = full scale
+    sirenGain.connect(ac.destination);
+  } catch { return; }
+  hush(); // the voice stops: the alarm owns the speakers now
+  let high = true;
+  const beat = () => {
+    const half = 0.5 / siren.hz;
+    const o = ac.createOscillator();
+    o.type = "square";
+    o.frequency.value = high ? 1900 : 1250;
+    o.connect(sirenGain);
+    o.start();
+    o.stop(ac.currentTime + half * 0.92);
+    high = !high;
+    sirenTimer = setTimeout(beat, half * 1000);
+  };
+  beat();
+}
+
 function hush() {
   queued = null;
   playing?.pause();
@@ -116,7 +147,7 @@ function hush() {
 function setSound(on) {
   soundOn = on;
   try { localStorage.setItem("dm-sound", on ? "on" : "off"); } catch {}
-  if (!on) hush();
+  if (!on) { hush(); siren(0); }
   video.muted = !on || mode !== "demo";
   const btn = $("sound");
   btn.classList.toggle("is-off", !on);
@@ -243,6 +274,7 @@ function resetState() {
   phone = { t: -1, phones: [], hands: [] };
   lastKey = "";
   voice.reset();
+  siren(0);
   hush();
 }
 
@@ -390,8 +422,9 @@ function onResult(d) {
   draw(reading, s, fresh ? phone : null);
   const p3 = performance.now();
   logState(s, t);
-  const cue = voice.update(s.reasons, t, s.yawns); // live during calibration too: a sleeping driver is not ignored
-  if (cue) say(cue, s.level === Level.ALERT);
+  const d = voice.update(s.reasons, t, s.level === Level.ALERT, s.yawns); // live during calibration too
+  if (d.cue) say(d.cue, d.preempt);
+  siren(d.sirenHz);
   if (done - lastUi > 66) {
     lastUi = done;
     renderPanel(reading, s, fresh ? phone : null);

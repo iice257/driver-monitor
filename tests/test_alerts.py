@@ -88,3 +88,49 @@ def test_every_cue_has_a_current_voice_clip_and_stale_ones_are_ignored(tmp_path)
     (tmp_path / "yawn.wav").write_bytes(b"")
     (tmp_path / "manifest.json").write_text('{"yawn": "Old wording"}', encoding="utf-8")
     assert clip_for(Cue("yawn", "Y", "New wording", 1.0), tmp_path) is None
+
+
+def run(policy, seconds, reasons, urgent, start=0.0):
+    out = []
+    for i in range(int(seconds * FPS)):
+        t = start + i / FPS
+        d = policy.update(reasons, t, urgent)
+        if d.cue or d.siren_hz:
+            out.append((round(t, 2), d))
+    return out
+
+
+def test_alert_cues_preempt_and_warn_cues_do_not():
+    from driver_monitor.alerts import AlarmPolicy
+
+    p = AlarmPolicy()
+    first = run(p, 0.1, ["Eyes off road"], urgent=True)[0][1]
+    assert first.cue.key == "away" and first.preempt
+    p = AlarmPolicy()
+    first = run(p, 0.1, ["Yawn"], urgent=False)[0][1]
+    assert first.cue.key == "yawn" and not first.preempt
+
+
+def test_closed_eyes_escalate_to_a_faster_siren_after_two_seconds():
+    from driver_monitor.alerts import AlarmPolicy
+
+    p = AlarmPolicy()
+    events = run(p, 9.0, ["Eyes closed 1.0s"], urgent=True)
+    phrases = [(t, d) for t, d in events if d.cue]
+    sirens = [(t, d.siren_hz) for t, d in events if d.siren_hz]
+    assert [t for t, _ in phrases] == [0.0] and phrases[0][1].preempt  # one phrase, then the siren
+    assert 1.9 <= sirens[0][0] <= 2.1
+    assert sirens[0][1] == 2.0 and sirens[-1][1] > sirens[0][1]
+    assert sirens[-1][1] <= p.siren_max_hz
+    rates = [hz for _, hz in sirens]
+    assert rates == sorted(rates)  # never slows down while the eyes stay shut
+
+
+def test_siren_stops_when_eyes_open_and_restarts_from_the_bottom():
+    from driver_monitor.alerts import AlarmPolicy
+
+    p = AlarmPolicy()
+    run(p, 5.0, ["Eyes closed 1.0s"], urgent=True)
+    assert p.update([], 5.1, False).siren_hz == 0
+    again = run(p, 3.0, ["Eyes closed 1.0s"], urgent=True, start=6.0)
+    assert [d.siren_hz for _, d in again if d.siren_hz][0] == 2.0

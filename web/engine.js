@@ -404,3 +404,30 @@ export class VoicePolicy {
     return null;
   }
 }
+
+/** VoicePolicy plus the safety rules: ALERT cues pre-empt; closed eyes escalate to a siren. Mirrors alerts.py. */
+export class AlarmPolicy {
+  constructor({ sirenAfterS = 2.0, sirenStartHz = 2.0, sirenMaxHz = 6.0, sirenRampHz = 0.5 } = {}) {
+    Object.assign(this, { sirenAfterS, sirenStartHz, sirenMaxHz, sirenRampHz });
+    this.voice = new VoicePolicy();
+    this.eyesSince = null;
+  }
+
+  reset() {
+    this.voice.reset();
+    this.eyesSince = null;
+  }
+
+  update(reasons, t, urgent, yawns = null) {
+    const eyes = reasons.some((r) => r.startsWith("Eyes closed"));
+    if (!eyes) this.eyesSince = null;
+    else if (this.eyesSince === null) this.eyesSince = t;
+    if (this.eyesSince !== null && t - this.eyesSince >= this.sirenAfterS) {
+      const hz = Math.min(this.sirenMaxHz, this.sirenStartHz + this.sirenRampHz * (t - this.eyesSince - this.sirenAfterS));
+      this.voice.update(reasons.filter((r) => !r.startsWith("Eyes closed")), t, yawns);
+      return { cue: null, preempt: true, sirenHz: hz };
+    }
+    const cue = this.voice.update(reasons, t, yawns);
+    return { cue, preempt: Boolean(cue) && urgent, sirenHz: 0 };
+  }
+}

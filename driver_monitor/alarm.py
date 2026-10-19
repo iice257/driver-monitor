@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from .alerts import Cue, VoicePolicy
+from .alerts import AlarmPolicy, Cue
 from .voice import clip_for
 
 
@@ -33,30 +33,48 @@ def beep(urgent: bool = True) -> None:
         time.sleep(0.36)
 
 
+def _clip_seconds(path) -> float:
+    import wave
+
+    try:
+        with wave.open(str(path)) as w:
+            return w.getnframes() / w.getframerate()
+    except Exception:
+        return 2.0
+
+
 class Alarm:
     def __init__(self, enabled: bool = True, voice: bool = True, rate: int = 185) -> None:
         self.enabled = enabled
-        self.policy = VoicePolicy()
+        self.policy = AlarmPolicy()
         self._want_voice = voice
         self._rate = rate
-        self._queue: queue.Queue[tuple[Cue, bool]] = queue.Queue(maxsize=2)
+        self._lock = threading.Lock()
+        self._next: tuple[Cue, bool] | None = None   # newest phrase wins; an ALERT replaces a waiting one
+        self._interrupt = threading.Event()          # cut the phrase that is playing now
+        self._siren_hz = 0.0
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         if enabled:
             self._thread.start()
 
     def update(self, reasons: list[str], t: float, urgent: bool, yawns: int | None = None) -> Cue | None:
-        """Feed the current reasons; queues a phrase when one is due. Returns the cue spoken."""
-        cue = self.policy.update(reasons, t, yawns)
-        if cue is not None and self.enabled:
-            try:
-                self._queue.put_nowait((cue, urgent))
-            except queue.Full:  # already behind: drop rather than talk about the past
-                pass
-        return cue
+        """Feed the current reasons; starts a phrase or the siren when one is due. Returns the cue."""
+        d = self.policy.update(reasons, t, urgent, yawns)
+        if self.enabled:
+            with self._lock:
+                self._siren_hz = d.siren_hz
+                if d.cue is not None and not (self._next and self._next[1] and not d.preempt):
+                    self._next = (d.cue, d.preempt)
+            if d.preempt:
+                self._interrupt.set()
+        return d.cue
 
     def reset(self) -> None:
         self.policy.reset()
+        with self._lock:
+            self._siren_hz, self._next = 0.0, None
+        self._interrupt.set()
 
     def _engine(self):
         if not self._want_voice:
@@ -75,24 +93,46 @@ class Alarm:
             return None
 
     def _play_clip(self, cue: Cue) -> bool:
+        """Play the clip; returns False if there is none. Cut short when _interrupt is set."""
         clip = clip_for(cue) if self._want_voice and sys.platform == "win32" else None
         if clip is None:
             return False
         import winsound
 
         try:
-            winsound.PlaySound(str(clip), winsound.SND_FILENAME)
-            return True
+            winsound.PlaySound(str(clip), winsound.SND_FILENAME | winsound.SND_ASYNC)
         except RuntimeError:
             return False
+        self._interrupt.wait(_clip_seconds(clip))
+        winsound.PlaySound(None, winsound.SND_PURGE)
+        return True
+
+    def _siren(self, hz: float) -> None:
+        """One cycle of the two-tone alarm: high then low, at full volume."""
+        half = max(40, int(500 / hz))
+        if sys.platform == "win32":
+            import winsound
+
+            winsound.Beep(1900, half)
+            winsound.Beep(1250, half)
+        else:
+            sys.stdout.write("")
+            sys.stdout.flush()
+            time.sleep(2 * half / 1000)
 
     def _run(self) -> None:
         engine = self._engine()  # SAPI objects must live on the thread that uses them
         while not self._stop.is_set():
-            try:
-                cue, urgent = self._queue.get(timeout=0.1)
-            except queue.Empty:
+            with self._lock:
+                hz, item, self._next = self._siren_hz, self._next, None
+            if hz > 0:
+                self._siren(hz)
                 continue
+            if item is None:
+                time.sleep(0.05)
+                continue
+            cue, urgent = item
+            self._interrupt.clear()
             if self._play_clip(cue):
                 continue
             if engine is not None:
@@ -106,3 +146,4 @@ class Alarm:
 
     def close(self) -> None:
         self._stop.set()
+        self._interrupt.set()
