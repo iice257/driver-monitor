@@ -94,6 +94,8 @@ h1 { font-size: clamp(30px, 4.4vw, 52px); line-height: 1.04; letter-spacing: -0.
   background: rgba(20, 20, 22, 0.6); backdrop-filter: blur(8px); border: 1px solid var(--line-strong);
   transition: background 0.2s;
 }
+.alarm-btn { left: 56px; }
+.alarm-btn.is-off .cross { display: block; }
 .sound-btn:hover { background: rgba(20, 20, 22, 0.85); }
 .sound-btn svg { width: 18px; height: 18px; fill: currentColor; }
 .sound-btn .cross { display: none; }

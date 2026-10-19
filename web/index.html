@@ -50,12 +50,16 @@
               <p class="banner-detail" id="banner-detail"></p>
             </div>
           </div>
-          <button class="sound-btn" id="sound" type="button" aria-pressed="true" aria-label="Mute alerts and reel sound">
+          <button class="sound-btn" id="sound" type="button" aria-pressed="true" aria-label="Mute the voice and reel sound" title="Voice on">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path class="cross" d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sound-btn alarm-btn" id="alarm" type="button" aria-pressed="true" aria-label="Turn alarm tones off" title="Alarm tones on">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a5.5 5.5 0 0 0-5.5 5.5v3.2L4.6 16h14.8l-1.9-3.8V9A5.5 5.5 0 0 0 12 3.5Zm-2 14h4a2 2 0 0 1-4 0Z"/><path class="cross" d="m4 4 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           </button>
           <div class="view-toggle" role="radiogroup" aria-label="Face overlay">
             <button type="button" role="radio" aria-checked="true" data-view="light" title="Eye and mouth outlines only">Light</button>
-            <button type="button" role="radio" aria-checked="false" data-view="mesh" title="All 478 face landmarks">Mesh</button>
+            <button type="button" role="radio" aria-checked="false" data-view="dots" title="All 478 face landmarks as dots">Dots</button>
+            <button type="button" role="radio" aria-checked="false" data-view="mesh" title="The full face mesh">Mesh</button>
           </div>
           <div class="veil" id="veil">
             <div class="veil-inner">
@@ -110,7 +114,7 @@
     <section class="notes">
       <p><strong>Nothing is uploaded.</strong> The models run on your device with MediaPipe, so camera frames never leave this page.</p>
       <p><strong>About the reel.</strong> The driver footage is AI-generated from one reference image, so no real person is on camera. <a href="/demo/showcase.mp4" target="_blank" rel="noopener">Watch the recorded run</a> with the desktop app's overlay and voice.</p>
-      <p><strong>Camera tips.</strong> Sit as you normally would for the first three seconds so it can learn your baseline, then try closing your eyes, yawning or looking away. Alerts are spoken aloud; mute them with the speaker button.</p>
+      <p><strong>Camera tips.</strong> Sit as you normally would for the first three seconds so it can learn your baseline, then try closing your eyes, yawning or looking away. Alerts are spoken after a short tone, and closed eyes set off an alarm; the speaker and bell buttons turn each off.</p>
     </section>
   </main>
 

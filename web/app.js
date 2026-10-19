@@ -2,6 +2,7 @@ import {
   DEFAULTS, DriverState, Level, LEFT_EYE_CONTOUR, LEFT_IRIS, MOUTH_CONTOUR, RIGHT_EYE_CONTOUR, RIGHT_IRIS,
   AlarmPolicy, cueFor, handAtEar, phoneNearFace, readFace,
 } from "./engine.js";
+import { TESSELATION } from "./mesh.js";
 
 const PHONE_EVERY = 8; // phone and hand models run in their own worker on every Nth frame
 
@@ -42,7 +43,8 @@ if (PERF) {
   window.__perfReset = () => Object.values(perf).forEach((a) => (a.length = 0));
 }
 let soundOn = readSoundPref();
-let view = readPref("dm-view", "light"); // "light": outlines only, "mesh": every landmark as a dot
+let alarmOn = readPref("dm-alarm", "on") !== "off"; // chimes and the siren, separate from the spoken voice
+let view = readPref("dm-view2", "light"); // "light": outlines only, "dots": every landmark as a dot, "mesh": the full triangulated face mesh
 
 // ---- sound: reel audio plus spoken alerts ------------------------------------
 
@@ -87,8 +89,16 @@ if ("speechSynthesis" in window) {
 }
 
 // An urgent alert interrupts; a caution waits behind the current phrase (one deep).
+let voiceTimer = 0;
 function say(cue, urgent) {
+  const lead = alarmOn ? chime(urgent) : 0; // the attention tone comes first, then the words
   if (!soundOn) return;
+  clearTimeout(voiceTimer);
+  if (lead) voiceTimer = setTimeout(() => speak(cue, urgent), lead * 1000);
+  else speak(cue, urgent);
+}
+
+function speak(cue, urgent) {
   const clip = clips[cue.key];
   if (clip && clip.phrase === cue.phrase) {
     if (playing && !playing.paused) {
@@ -109,7 +119,7 @@ function say(cue, urgent) {
 // Closed eyes for 2 s after the first phrase: a loud two-tone alarm that speeds up until they open.
 let ac = null, sirenTimer = 0, sirenGain = null;
 function siren(hz) {
-  if (!soundOn || hz <= 0) {
+  if (!alarmOn || hz <= 0) {
     if (sirenTimer) { clearTimeout(sirenTimer); sirenTimer = 0; }
     return;
   }
@@ -137,7 +147,33 @@ function siren(hz) {
   beat();
 }
 
+// Attention tone before the words: a soft two-note chime for a caution, three sharp beeps for an alert.
+// Returns how long it lasts, in seconds.
+function chime(urgent) {
+  try {
+    ac ||= new AudioContext();
+    if (ac.state === "suspended") ac.resume();
+  } catch { return 0; }
+  const notes = urgent ? [[1480, 0], [1480, 0.17], [1480, 0.34]] : [[660, 0], [880, 0.16]];
+  const len = urgent ? 0.1 : 0.22, peak = urgent ? 0.32 : 0.22;
+  const t0 = ac.currentTime + 0.01;
+  for (const [f, at] of notes) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = urgent ? "square" : "sine";
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0 + at);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
+    o.connect(g).connect(ac.destination);
+    o.start(t0 + at);
+    o.stop(t0 + at + len + 0.02);
+  }
+  try { navigator.vibrate?.(urgent ? [180, 70, 180, 70, 360] : [120]); } catch {}
+  return notes[notes.length - 1][1] + len + 0.12;
+}
+
 function hush() {
+  clearTimeout(voiceTimer);
   queued = null;
   playing?.pause();
   playing = null;
@@ -147,13 +183,24 @@ function hush() {
 function setSound(on) {
   soundOn = on;
   try { localStorage.setItem("dm-sound", on ? "on" : "off"); } catch {}
-  if (!on) { hush(); siren(0); }
+  if (!on) hush();
   video.muted = !on || mode !== "demo";
   const btn = $("sound");
   btn.classList.toggle("is-off", !on);
   btn.setAttribute("aria-pressed", String(on));
-  btn.setAttribute("aria-label", on ? "Mute alerts and reel sound" : "Turn sound on");
-  btn.title = on ? "Sound on" : "Sound off";
+  btn.setAttribute("aria-label", on ? "Mute the voice and reel sound" : "Turn the voice and reel sound on");
+  btn.title = on ? "Voice on" : "Voice off";
+}
+
+function setAlarm(on) {
+  alarmOn = on;
+  try { localStorage.setItem("dm-alarm", on ? "on" : "off"); } catch {}
+  if (!on) siren(0);
+  const btn = $("alarm");
+  btn.classList.toggle("is-off", !on);
+  btn.setAttribute("aria-pressed", String(on));
+  btn.setAttribute("aria-label", on ? "Turn alarm tones off" : "Turn alarm tones on");
+  btn.title = on ? "Alarm tones on" : "Alarm tones off";
 }
 
 // ---- models -----------------------------------------------------------------
@@ -505,7 +552,7 @@ function readPref(key, fallback) {
 function setView(v) {
   view = v;
   for (const b of document.querySelectorAll(".view-toggle [data-view]")) b.setAttribute("aria-checked", String(b.dataset.view === v));
-  try { localStorage.setItem("dm-view", v); } catch {}
+  try { localStorage.setItem("dm-view2", v); } catch {}
 }
 document.querySelector(".view-toggle").addEventListener("click", (e) => {
   const b = e.target.closest("[data-view]");
@@ -561,6 +608,18 @@ function draw(r, s, ph) {
   }
 
   if (view === "mesh") {
+    // The full triangulated mesh (2556 edges) in one path, tinted by the current level.
+    ctx.lineWidth = Math.max(0.8, 0.8 * u);
+    ctx.strokeStyle = s.level === Level.ALERT ? "rgba(239,68,68,0.5)" : s.level === Level.WARN ? "rgba(245,181,70,0.5)" : "rgba(200,215,210,0.55)";
+    ctx.beginPath();
+    const pts = r.points;
+    for (let i = 0; i < TESSELATION.length; i += 2) {
+      const a = pts[TESSELATION[i]], b = pts[TESSELATION[i + 1]];
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+    }
+    ctx.stroke();
+  } else if (view === "dots") {
     // Every landmark as a dot, tinted by the current level; one path keeps it cheap.
     const rad = 1.6 * u;
     ctx.fillStyle = s.level === Level.ALERT ? "rgba(239,68,68,0.9)" : s.level === Level.WARN ? "rgba(245,181,70,0.9)" : "rgba(95,208,138,0.9)";
@@ -675,8 +734,11 @@ function renderPanel(r, s, ph) {
     if ($("banner-title").textContent !== headline) $("banner-title").textContent = headline;
     if ($("banner-detail").textContent !== detail) $("banner-detail").textContent = detail;
     banner.hidden = false;
+    const tag = s.level === Level.ALERT ? "⚠ " : "";
+    if (document.hidden || s.level === Level.ALERT) document.title = `${tag}${headline} · Driver Monitor`;
   } else {
     banner.hidden = true;
+    document.title = "Driver Monitor";
   }
 
   if (mode === "demo") {
@@ -736,6 +798,7 @@ document.querySelectorAll(".mode").forEach((b) => {
 
 $("play").addEventListener("click", () => (video.paused ? playDemo() : video.pause()));
 $("sound").addEventListener("click", () => setSound(!soundOn));
+$("alarm").addEventListener("click", () => setAlarm(!alarmOn));
 video.addEventListener("play", () => $("play").classList.add("is-playing"));
 video.addEventListener("pause", () => $("play").classList.remove("is-playing"));
 $("recal").addEventListener("click", () => {
@@ -752,6 +815,7 @@ window.addEventListener("keydown", (e) => {
 
 buildPanel();
 setSound(soundOn);
+setAlarm(alarmOn);
 function boot() {
   veil({ text: "Loading models", busy: true });
   return Promise.all([loadModels(), loadChapters(), loadVoice()]);
