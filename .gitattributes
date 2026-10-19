@@ -1,0 +1,3 @@
+web/vendor/** -text
+web/models/* binary
+driver_monitor/fonts/Inter.ttf binary
