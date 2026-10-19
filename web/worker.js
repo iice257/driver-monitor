@@ -46,8 +46,16 @@ async function init(role) {
     hands.detectForVideo(blank, 1);
     postMessage({ type: "phone-ready" });
   } catch (err) {
-    console.warn("Phone detection unavailable", err);
+    phoneFailed(err);
   }
+}
+
+let phoneDead = false;
+function phoneFailed(err) {
+  if (phoneDead) return;
+  phoneDead = true;
+  console.warn("Phone detection off", err);
+  postMessage({ type: "phone-error", message: String((err && err.message) || err) });
 }
 
 function analyse({ bitmap, ts, id, role }) {
@@ -66,16 +74,20 @@ function analyse({ bitmap, ts, id, role }) {
     found = { xyz, shapes };
   }
   let ph = null;
-  if (role === "phone" && objects && hands) {
-    const det = objects.detectForVideo(bitmap, ts);
-    const hr = hands.detectForVideo(bitmap, ts);
-    ph = {
-      phones: (det.detections || []).map((d) => ({
-        box: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.originX + d.boundingBox.width, d.boundingBox.originY + d.boundingBox.height],
-        score: d.categories[0]?.score || 0,
-      })),
-      hands: (hr.landmarks || []).map((l) => l.map((p) => [p.x, p.y])),
-    };
+  if (role === "phone" && objects && hands && !phoneDead) {
+    try {
+      const det = objects.detectForVideo(bitmap, ts);
+      const hr = hands.detectForVideo(bitmap, ts);
+      ph = {
+        phones: (det.detections || []).map((d) => ({
+          box: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.originX + d.boundingBox.width, d.boundingBox.originY + d.boundingBox.height],
+          score: d.categories[0]?.score || 0,
+        })),
+        hands: (hr.landmarks || []).map((l) => l.map((p) => [p.x, p.y])),
+      };
+    } catch (err) {
+      phoneFailed(err);
+    }
   }
   const bw = bitmap.width;
   bitmap.close();
@@ -84,6 +96,6 @@ function analyse({ bitmap, ts, id, role }) {
 
 self.onmessage = (e) => {
   const d = e.data;
-  if (d.type === "init") init(d.role).catch((err) => postMessage({ type: "error", message: String((err && err.message) || err) }));
+  if (d.type === "init") init(d.role).catch((err) => (d.role === "phone" ? phoneFailed(err) : postMessage({ type: "error", message: String((err && err.message) || err) })));
   else if (d.type === "frame") analyse(d);
 };

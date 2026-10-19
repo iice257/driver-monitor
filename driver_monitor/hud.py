@@ -117,7 +117,8 @@ def _alert_overlay(img: np.ndarray, s: Status, t: float) -> None:
 
 
 def draw(img: np.ndarray, face: FaceReading | None, s: Status, fps: float,
-         phone: PhoneResult | None = None, cfg=None, t: float = 0.0) -> np.ndarray:
+         phone: PhoneResult | None = None, cfg=None, t: float = 0.0,
+         phone_off: bool = False) -> np.ndarray:
     h, w = img.shape[:2]
     color = LEVEL_COLOR[s.level]
 
@@ -159,8 +160,10 @@ def draw(img: np.ndarray, face: FaceReading | None, s: Status, fps: float,
     y = _bar(img, x, y, bw, "Gaze", s.gaze, -1, 1, (-gl, gl), active=abs(s.gaze) > gl)
     n_phones = len(phone.phones) if phone else 0
     cv2.putText(img, f"Yawns (5 min)  {s.yawns}", (x, y), FONT, 0.42, MUTED, 1, AA)
-    cv2.putText(img, f"Phone  {'yes' if n_phones else 'no'}", (x + bw - 70, y), FONT, 0.42,
-                LEVEL_COLOR[Level.ALERT] if n_phones else MUTED, 1, AA)
+    phone_txt = "Phone detection off" if phone_off else f"Phone  {'yes' if n_phones else 'no'}"
+    (pw_, _), _ = cv2.getTextSize(phone_txt, FONT, 0.42, 1)
+    cv2.putText(img, phone_txt, (x + bw - pw_, y), FONT, 0.42,
+                LEVEL_COLOR[Level.WARN] if phone_off else LEVEL_COLOR[Level.ALERT] if n_phones else MUTED, 1, AA)
 
     # Alert banner and flashing frame border
     if s.level > Level.OK and s.reasons:

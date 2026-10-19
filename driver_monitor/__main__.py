@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -52,6 +53,7 @@ def main() -> None:
     writer = None
     log = args.log.open("a", encoding="utf-8") if args.log else None
     last_key: tuple | None = None
+    phone_reported = False
     t0 = time.monotonic()
     fps, prev = 0.0, time.monotonic()
     recal = sorted(float(x) for x in args.recalibrate_at.split(",") if x.strip())
@@ -71,6 +73,12 @@ def main() -> None:
                     state.recalibrate()
                     alarm.reset()
                 face = tracker.process(frame, int(t * 1000))
+                if watcher.error and not phone_reported:
+                    phone_reported = True
+                    print(f"Phone detection off: {watcher.error}", file=sys.stderr)
+                    if log:
+                        log.write(json.dumps({"t": round(t, 2), "level": "INFO", "reasons": ["Phone detection off"]}) + "
+")
                 watcher.submit(frame, t)
                 phone = watcher.latest()
                 fresh = abs(t - phone.t) < 1.0
@@ -94,7 +102,7 @@ def main() -> None:
                 now = time.monotonic()
                 fps = 0.9 * fps + 0.1 * (1.0 / max(now - prev, 1e-6))
                 prev = now
-                hud.draw(frame, face, status, fps, phone if fresh else None, cfg, t)
+                hud.draw(frame, face, status, fps, phone if fresh else None, cfg, t, phone_off=bool(watcher.error))
 
                 if args.record:
                     if writer is None:

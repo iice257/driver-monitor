@@ -134,3 +134,44 @@ def test_siren_stops_when_eyes_open_and_restarts_from_the_bottom():
     assert p.update([], 5.1, False).siren_hz == 0
     again = run(p, 3.0, ["Eyes closed 1.0s"], urgent=True, start=6.0)
     assert [d.siren_hz for _, d in again if d.siren_hz][0] == 2.0
+
+
+def test_phone_watcher_reports_a_failing_backend_instead_of_dying(monkeypatch):
+    import time
+
+    import numpy as np
+
+    from driver_monitor import phone
+
+    class Broken:
+        def __init__(self, score):
+            pass
+
+        def __call__(self, frame):
+            raise RuntimeError("delegate lost")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(phone, "_MediaPipeBackend", Broken)
+    w = phone.PhoneWatcher()
+    w.submit(np.zeros((8, 8, 3), np.uint8), 0.0)
+    for _ in range(50):
+        if w.error:
+            break
+        time.sleep(0.05)
+    assert "delegate lost" in w.error
+    assert w.latest().phones == []
+    w.close()
+
+
+def test_phone_watcher_survives_a_backend_that_cannot_be_built(monkeypatch):
+    from driver_monitor import phone
+
+    def boom(score):
+        raise FileNotFoundError("model missing")
+
+    monkeypatch.setattr(phone, "_MediaPipeBackend", boom)
+    w = phone.PhoneWatcher()
+    assert "model missing" in w.error
+    w.close()

@@ -12,6 +12,7 @@ Backends:
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -67,6 +68,9 @@ def phone_near_face(phones: list[tuple[Box, float]], face: Box) -> bool:
     pad = 0.5 * (x1 - x0)
     zone = (x0 - pad, y0, x1 + pad, y1 + pad)
     return any(_overlap(b, zone) > 0.3 for b, _ in phones)
+
+
+log = logging.getLogger(__name__)
 
 
 class _MediaPipeBackend:
@@ -134,7 +138,12 @@ class PhoneWatcher:
     """Runs the phone/hand models on a background thread over the latest frame."""
 
     def __init__(self, backend: str = "mediapipe", score: float = 0.3) -> None:
-        self._backend = _YoloBackend(score) if backend == "yolo" else _MediaPipeBackend(score)
+        self.error: str | None = None   # set once if the backend fails; the watcher then idles
+        self._backend = None
+        try:
+            self._backend = _YoloBackend(score) if backend == "yolo" else _MediaPipeBackend(score)
+        except Exception as exc:  # missing model, missing ultralytics, no delegate...
+            self._fail(exc)
         self._lock = threading.Lock()
         self._frame: tuple[float, np.ndarray] | None = None
         self._result = PhoneResult()
@@ -143,7 +152,13 @@ class PhoneWatcher:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def _fail(self, exc: Exception) -> None:
+        self.error = f"{type(exc).__name__}: {exc}"
+        log.error("Phone detection off: %s", self.error)
+
     def submit(self, frame_bgr: np.ndarray, t: float) -> None:
+        if self.error:
+            return
         with self._lock:
             self._frame = (t, frame_bgr.copy())
         self._wake.set()
@@ -162,7 +177,11 @@ class PhoneWatcher:
             if job is None:
                 continue
             t, frame = job
-            phones, hands = self._backend(frame)
+            try:
+                phones, hands = self._backend(frame)
+            except Exception as exc:
+                self._fail(exc)
+                continue
             with self._lock:
                 self._result = PhoneResult(t=t, phones=phones, hands=hands)
 
@@ -170,11 +189,14 @@ class PhoneWatcher:
         self._stop.set()
         self._wake.set()
         self._thread.join(timeout=2)
-        self._backend.close()
+        if self._backend is not None:
+            self._backend.close()
 
 
 class NullWatcher:
     """Stand-in when phone detection is disabled."""
+
+    error: str | None = None
 
     def submit(self, frame_bgr: np.ndarray, t: float) -> None:
         pass

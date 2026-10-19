@@ -176,14 +176,25 @@ function loadModels() {
     worker.postMessage({ type: "init", role: "face" });
     // Phone evidence is optional and loads in its own worker: the face pipeline starts without it.
     phoneWorker = new Worker("/worker.js");
-    phoneWorker.onerror = () => {};
+    phoneWorker.onerror = (e) => phoneOff(e.message || "worker failed");
     phoneWorker.onmessage = (e) => {
       const d = e.data;
       if (d.type === "phone-ready") phoneReady = true;
+      else if (d.type === "phone-error") phoneOff(d.message);
       else if (d.type === "result") onPhone(d);
     };
     phoneWorker.postMessage({ type: "init", role: "phone" });
   });
+}
+
+// Phone evidence is a bonus: if its models fail, say so (HUD and log) instead of silently reading "No".
+let phoneBroken = false;
+function phoneOff(why) {
+  if (phoneBroken) return;
+  phoneBroken = true;
+  phoneReady = false;
+  console.warn("Phone detection off:", why);
+  logLine(mode === "demo" ? video.currentTime : 0, "Phone detection off", 1);
 }
 
 // ---- veil -------------------------------------------------------------------
@@ -602,7 +613,8 @@ function renderPanel(r, s, ph) {
   setReading("perclos", s.perclos, s.perclos >= cfg.perclos_warn);
 
   $("yawns").textContent = s.yawns;
-  $("phone").textContent = ph && ph.phones.length ? "Yes" : "No";
+  $("phone").textContent = phoneBroken ? "Off" : ph && ph.phones.length ? "Yes" : "No";
+  $("phone").title = phoneBroken ? "Phone detection off" : "";
   $("fps").textContent = fps ? Math.round(fps) : "–";
 
   const banner = $("banner");
