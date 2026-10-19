@@ -40,7 +40,7 @@ camera frame ───┤                                                       
 - **Gaze**: the iris position between the eye corners catches eyes-only glances that head pose misses.
 - **Phone use**: a COCO object detector finds `cell phone`, and hand landmarks catch a hand held at the ear. Both run on a background thread over the latest frame, so the main loop stays at camera rate. Detections tolerate short dropouts.
 - **PERCLOS**: the percentage of time the eyes are closed, an established fatigue metric. It is time-weighted, so frame drops don't skew it.
-- **Per-driver calibration**: for the first 3 seconds the system learns *your* open-eye EAR and neutral head pose. Thresholds are relative to that baseline rather than a fixed value that only suits some faces. Press `c` to recalibrate.
+- **Per-driver calibration**: over the first few seconds of good frames (about 2 s, within an 8 s window) the system learns *your* open-eye EAR and neutral head pose. Thresholds are relative to that baseline rather than a fixed value that only suits some faces. Press `c` to recalibrate.
 
 The decision logic in [`state.py`](driver_monitor/state.py) is pure Python with explicit timestamps, so it is unit tested without a camera.
 
@@ -82,14 +82,14 @@ The HUD shows each live signal with its threshold marker. Watch where your value
 
 ## Test reel
 
-`samples/` holds three AI-generated scenarios (microsleep, repeated yawning, looking away). All three were made with Veo in Gemini from one reference image, [`samples/driver_reference.jpg`](samples/driver_reference.jpg), used as the opening frame, so the same driver appears in every clip. Generate new scenarios from that image to keep the reel consistent.
+`samples/` holds five AI-generated scenarios: two normal-driving clips that must stay quiet (calm driving, talking and singing) and three that must alert (repeated yawning, microsleep, looking away). All were made with Veo in Gemini from one reference image, [`samples/driver_reference.jpg`](samples/driver_reference.jpg), used as the opening frame, so the same driver appears in every clip. Generate new scenarios from that image to keep the reel consistent.
 
 ```bash
 python -m driver_monitor.evaluate samples/scenarios.json         # each clip raises what it should, and nothing it shouldn't
 python -m driver_monitor.reel samples/scenarios.json         # writes web/demo/{reel,showcase}.mp4, poster.jpg, chapters.json
 ```
 
-`reel` joins the clips in scenario order as one continuous drive (`reel.mp4`, which the web demo analyses live). Each cut is a short dissolve, and a single uniform cabin ambience runs underneath, looped from one clip with crossfades away from the cuts. It also renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the ambience. The videos live only in `web/demo`; `samples/` holds the source clips.
+`reel` joins the clips in scenario order as one continuous drive, calibrated once on the opening clip (no recalibration at the cuts) (`reel.mp4`, which the web demo analyses live). Each cut is a short dissolve, and a single uniform cabin ambience runs underneath, looped from one clip with crossfades away from the cuts. It also renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the ambience. The videos live only in `web/demo`; `samples/` holds the source clips.
 
 ## Models and versions
 

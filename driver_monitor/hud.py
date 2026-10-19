@@ -266,9 +266,18 @@ def _calibration_note(img: np.ndarray, s: Status, k: float) -> None:
     draw_text(img, [(x0 + pad, y1 - round(26 * k), msg, px, MEDIUM, FG, "l")])
 
 
+def _caption(img: np.ndarray, msg: str, k: float) -> None:
+    """A small plain-text note, top left (used to say the demo compresses a time window)."""
+    px, pad = round(14 * k), round(14 * k)
+    bw, bh = int(pad * 2 + text_width(msg, px, MEDIUM)), round(40 * k)
+    x0, y0 = round(20 * k), round(20 * k)
+    _rounded_blend(img, x0, y0, x0 + bw, y0 + bh, round(10 * k), PANEL, 0.74)
+    draw_text(img, [(x0 + pad, y0 + bh // 2 + px // 3, msg, px, MEDIUM, FG, "l")])
+
+
 def draw(img: np.ndarray, face: FaceReading | None, s: Status, fps: float,
          phone: PhoneResult | None = None, cfg=None, t: float = 0.0,
-         phone_off: bool = False) -> np.ndarray:
+         phone_off: bool = False, note: str | None = None) -> np.ndarray:
     from .state import Config
 
     cfg = cfg or Config()
@@ -289,4 +298,6 @@ def draw(img: np.ndarray, face: FaceReading | None, s: Status, fps: float,
         _alert_overlay(img, s, t, k)
     if s.calibrating and s.level == Level.OK:
         _calibration_note(img, s, k)
+    elif note:
+        _caption(img, note, k)
     return img

@@ -1,5 +1,7 @@
 [
-  {"label": "Microsleep", "start": 0.0, "end": 8.77, "expect": "Eyes stay shut while the head droops: 'Eyes closed' alert after 1.2 s"},
-  {"label": "Repeated yawning", "start": 8.77, "end": 16.75, "expect": "Each yawn is noted, the squint isn't a microsleep, three yawns flag fatigue"},
-  {"label": "Looking away", "start": 16.75, "end": 26.17, "expect": "Head turns to the side window for more than 2 s: 'Eyes off the road' alert, cleared on return"}
+  {"label": "Calm driving", "start": 0.0, "end": 4.93, "expect": "Eyes on the road, normal blinks: the monitor calibrates on this and stays quiet"},
+  {"label": "Talking and singing", "start": 4.93, "end": 11.46, "expect": "Chatting and singing along, eyes on the road: no yawn, no alert"},
+  {"label": "Repeated yawning", "start": 11.46, "end": 19.36, "expect": "Each yawn is noted, the squint isn't a microsleep. Three yawns flag fatigue (the demo compresses the usual 5-minute window)"},
+  {"label": "Microsleep", "start": 19.36, "end": 28.55, "expect": "Eyes stay shut while the head droops: 'Eyes closed' alert after 1.2 s"},
+  {"label": "Looking away", "start": 28.55, "end": 37.63, "expect": "Head turns to the side window for more than 2 s: 'Eyes off the road' alert, cleared on return"}
 ]

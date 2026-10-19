@@ -393,10 +393,13 @@ function tick() {
     t = video.currentTime;
     if (t === lastVideoT) return; // no new frame yet
     const idx = chapterAt(t);
-    // New scenario, or the reel looped / was scrubbed backwards: a new driver, so recalibrate.
-    if (idx !== chapterIdx || t < lastVideoT - 0.5) {
-      chapterIdx = idx;
+    // The reel is one drive, calibrated once. Only a loop or a scrub backwards starts over.
+    if (t < lastVideoT - 0.5) {
       resetState();
+      chapterIdx = -1;
+    }
+    if (idx !== chapterIdx) {
+      chapterIdx = idx;
       if (chapters[idx]) logDivider(chapters[idx].label);
     }
     lastVideoT = t;
@@ -666,7 +669,8 @@ function renderPanel(r, s, ph) {
   if (s.level > Level.OK && s.reasons.length) {
     const cue = s.reasons.map(cueFor).find(Boolean);
     const headline = cue ? cue.headline : s.reasons[0];
-    const detail = s.reasons.join("  ·  ");
+    let detail = s.reasons.join("  ·  ");
+    if (mode === "demo" && s.reasons.some((x) => x.startsWith("Fatigue: 3 yawns"))) detail += "  ·  Demo: three yawns in seconds. In real driving the window is 5 minutes.";
     if (banner.hidden || banner.dataset.level !== String(s.level)) banner.dataset.level = s.level;
     if ($("banner-title").textContent !== headline) $("banner-title").textContent = headline;
     if ($("banner-detail").textContent !== detail) $("banner-detail").textContent = detail;

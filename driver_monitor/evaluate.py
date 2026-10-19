@@ -65,6 +65,16 @@ def _seen(tl, prefix: str, window=None) -> list[float]:
     return [t for t, _, reasons in tl if lo <= t <= hi and any(r.startswith(prefix) for r in reasons)]
 
 
+def _onsets(tl, reasons: list[str]) -> int:
+    """How many separate times any of the reasons switched on."""
+    count, prev = 0, False
+    for _, _, rs in tl:
+        now = any(r.startswith(x) for r in rs for x in reasons)
+        count += now and not prev
+        prev = now
+    return count
+
+
 def check(scenario: dict, tl) -> list[str]:
     problems = []
     for exp in scenario.get("expect", []):
@@ -88,15 +98,27 @@ def main() -> None:
     cfg = Config.load(args.config)
     scenarios = json.loads(args.spec.read_text(encoding="utf-8"))
     failed = 0
+    neg_seconds, neg_alarms = 0.0, 0
     for sc in scenarios:
         tl = timeline(args.spec.parent / sc["clip"], cfg)
         problems = check(sc, tl)
         failed += bool(problems)
         events = sorted({re.sub(r" [\d.]+s?%?$", "", r) for _, _, rs in tl for r in rs})
         print(f"{'PASS' if not problems else 'FAIL'}  {sc['label']:<22} {sc['clip']:<16} saw: {', '.join(events) or 'nothing'}")
+        for exp in sc.get("expect", []):
+            hits = _seen(tl, exp["reason"], exp.get("within"))
+            print(f"        expect {exp['reason']!r}: {len(hits)} frames" + (f", first at {hits[0]:.1f}s" if hits else ""))
+        for reason in sc.get("forbid", []):
+            hits = _seen(tl, reason)
+            print(f"        forbid {reason!r}: {len(hits)} frames")
+        if sc.get("negative"):  # normal driving: every forbidden onset is a false alarm
+            neg_seconds += tl[-1][0] if tl else 0.0
+            neg_alarms += _onsets(tl, sc.get("forbid", []))
         for msg in problems:
             print(f"        {msg}")
     print(f"\n{len(scenarios) - failed}/{len(scenarios)} scenarios passed")
+    if neg_seconds:
+        print(f"False alarms on normal driving: {neg_alarms} in {neg_seconds:.0f} s = {neg_alarms / neg_seconds * 60:.2f} per minute")
     sys.exit(1 if failed else 0)
 
 

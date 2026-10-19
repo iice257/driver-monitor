@@ -145,23 +145,21 @@ def join(clips: list[Path], out: Path, cuts: list[tuple[float, float]], ambience
     return starts
 
 
-def annotate(reel: Path, out: Path, cuts: list[float], cfg: Config, model: Path) -> list[tuple[float, str]]:
+FATIGUE_NOTE = "Demo: three yawns in seconds. In real driving the window is 5 minutes."
+
+
+def annotate(reel: Path, out: Path, cfg: Config, model: Path) -> list[tuple[float, str]]:
     """Run the monitor over the reel, drawing the HUD. Returns (t, phrase) for every spoken alert."""
     cap = cv2.VideoCapture(str(reel))
     rate = cap.get(cv2.CAP_PROP_FPS) or FPS
     writer = None
     state, voice, said = DriverState(cfg), VoicePolicy(), []
-    pending = sorted(c for c in cuts if c > 0)
-    with FaceTracker(model) as tracker:
+    with FaceTracker(model) as tracker:  # one drive: calibrated once on the opener, never reset at a cut
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
             t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-            if pending and t >= pending[0] - 1e-3:
-                pending.pop(0)
-                state.recalibrate()  # a new scenario is a new driver, as in the web demo
-                voice.reset()
             face = tracker.process(frame, int(t * 1000))
             f = Frame(t=t, face=face is not None)
             if face is not None:
@@ -172,7 +170,8 @@ def annotate(reel: Path, out: Path, cuts: list[float], cfg: Config, model: Path)
             cue = voice.update(s.reasons, t, s.yawns)
             if cue is not None:
                 said.append((t, cue.phrase))
-            hud.draw(frame, face, s, rate, None, cfg, t)
+            note = FATIGUE_NOTE if any(r.startswith("Fatigue: 3 yawns") for r in s.reasons) else None
+            hud.draw(frame, face, s, rate, None, cfg, t, note=note)
             if writer is None:
                 writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), rate, frame.shape[1::-1])
             writer.write(frame)
@@ -276,7 +275,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        said = annotate(reel, tmp / "hud.mp4", starts, Config.load(args.config), args.model)
+        said = annotate(reel, tmp / "hud.mp4", Config.load(args.config), args.model)
         voices = synthesize({phrase for _, phrase in said}, tmp)
         placed = mix(tmp / "hud.mp4", reel, said, voices, showcase)
     print(f"showcase.mp4  {len(placed)} spoken alerts")
