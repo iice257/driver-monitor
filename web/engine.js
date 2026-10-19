@@ -4,8 +4,13 @@
 export const Level = { OK: 0, WARN: 1, ALERT: 2 };
 
 export const DEFAULTS = {
-  calibration_s: 3.0,
   smoothing: 0.35,
+  calib_good_s: 2.0,
+  calib_window_s: 8.0,
+  calib_ear_min: 0.2,
+  calib_blink_max: 0.3,
+  calib_jaw_max: 0.2,
+  calib_pose_deg: 15.0,
   ear_ratio: 0.72,
   ear_floor: 0.14,
   blink_score: 0.65,
@@ -19,7 +24,9 @@ export const DEFAULTS = {
   yawn_notice_s: 3.0,
   yawn_window_s: 300.0,
   yawn_warn_count: 3,
-  yawn_squint_s: 6.0,
+  yawn_squint_s: 2.0,
+  eye_pose_yaw_deg: 30.0,
+  eye_pose_pitch_deg: 25.0,
   yaw_limit_deg: 25.0,
   pitch_down_limit_deg: 15.0,
   pitch_up_limit_deg: 25.0,
@@ -27,6 +34,7 @@ export const DEFAULTS = {
   hysteresis: 0.75,
   distraction_s: 2.0,
   no_face_s: 2.0,
+  no_face_alert_s: 5.0,
   phone_s: 1.0,
   phone_down_s: 1.0,
   hand_at_ear_s: 2.0,
@@ -189,8 +197,10 @@ export class DriverState {
 
   reset() {
     const c = this.cfg;
-    this.start = null;
-    this.calib = [];
+    this.calibLast = null;
+    this.calib = []; // good frames: [t, dt, frame]
+    this.calibGood = 0;
+    this.calibHint = null;
     this.baselineEar = null;
     this.baselinePitch = this.baselineYaw = this.baselineGaze = 0;
     this.closed = new Timer();
@@ -214,15 +224,34 @@ export class DriverState {
     return Math.max(this.cfg.ear_floor, this.baselineEar * this.cfg.ear_ratio);
   }
 
+  /** Why this frame can't teach us what an attentive driver looks like, or null if it can. */
+  calibProblem(f) {
+    const c = this.cfg;
+    if (!f.face) return "Face the camera";
+    const blink = f.blink ?? null;
+    if (!(f.ear > c.calib_ear_min || (blink !== null && blink < c.calib_blink_max))) return "Open your eyes";
+    const jaw = f.jawOpen ?? null;
+    if (jaw !== null ? jaw > c.calib_jaw_max : f.mar > c.yawn_mar) return "Close your mouth";
+    if (Math.abs(f.yaw) > c.calib_pose_deg || Math.abs(f.pitch) > c.calib_pose_deg) return "Look at the road";
+    return null;
+  }
+
   calibrate(f) {
-    if (this.start === null) this.start = f.t;
-    if (f.face) this.calib.push(f);
-    if (f.t - this.start < this.cfg.calibration_s || this.calib.length < 10) return true;
-    const ears = this.calib.map((c) => c.ear).sort((a, b) => a - b);
+    const c = this.cfg;
+    const dt = this.calibLast === null ? 0 : Math.min(Math.max(f.t - this.calibLast, 0), 0.25);
+    this.calibLast = f.t;
+    this.calibHint = this.calibProblem(f);
+    if (this.calibHint === null) this.calib.push([f.t, dt, f]);
+    while (this.calib.length && f.t - this.calib[0][0] > c.calib_window_s) this.calib.shift();
+    this.calibGood = this.calib.reduce((sum, x) => sum + x[1], 0);
+    if (this.calibGood < c.calib_good_s || this.calib.length < 10) return true;
+    const frames = this.calib.map((x) => x[2]);
+    const ears = frames.map((x) => x.ear).sort((a, b) => a - b);
     this.baselineEar = median(ears.slice(ears.length >> 1));
-    this.baselinePitch = median(this.calib.map((c) => c.pitch));
-    this.baselineYaw = median(this.calib.map((c) => c.yaw));
-    this.baselineGaze = median(this.calib.map((c) => c.gaze));
+    this.baselinePitch = median(frames.map((x) => x.pitch));
+    this.baselineYaw = median(frames.map((x) => x.yaw));
+    this.baselineGaze = median(frames.map((x) => x.gaze));
+    this.calibHint = null;
     return false;
   }
 
@@ -240,13 +269,12 @@ export class DriverState {
     return shut / total;
   }
 
-  attention(f, calibrating) {
+  attention(f) {
     const c = this.cfg;
     if (!f.face) return [0, 0, 0, this.away.update(false, f.t)];
     const dYaw = this.yawE.push(f.yaw) - this.baselineYaw;
     const dPitch = this.pitchE.push(f.pitch) - this.baselinePitch;
     const dGaze = this.gazeE.push(f.gaze) - this.baselineGaze;
-    if (calibrating) return [dYaw, dPitch, dGaze, 0];
     const k = this.isAway ? c.hysteresis : 1;
     this.isAway =
       Math.abs(dYaw) > c.yaw_limit_deg * k ||
@@ -265,11 +293,15 @@ export class DriverState {
     const jaw = f.jawOpen ?? null;
     const mouthOpen = f.face && (jaw !== null ? jaw > c.yawn_jaw : f.mar > c.yawn_mar);
     const openFor = this.mouth.update(mouthOpen, f.t);
-    const opening = f.face && (jaw !== null ? jaw > c.yawn_jaw * 0.6 : f.mar > c.yawn_mar * 0.6);
-    const squint = opening && openFor < c.yawn_squint_s;
+    // Only a real yawn (jaw past the yawn threshold) earns the squint exemption, and only for
+    // yawn_squint_s: a slack jaw with shut eyes is a driver falling asleep.
+    const squint = mouthOpen && openFor < c.yawn_squint_s;
 
+    // With the head turned or tipped far from the camera EAR is unreliable: blink blendshape only.
     const thr = this.threshold();
-    const closed = f.face && !squint && (f.ear < thr || (f.blink !== null && f.blink > c.blink_score));
+    const blinkClosed = f.blink != null && f.blink > c.blink_score;
+    const shut = Math.abs(f.yaw) > c.eye_pose_yaw_deg || f.pitch < -c.eye_pose_pitch_deg ? blinkClosed : f.ear < thr || blinkClosed;
+    const closed = f.face && !squint && shut;
     const closedFor = this.closed.update(closed, f.t);
     const perclos = this.perclos(f.t, closed);
 
@@ -283,7 +315,7 @@ export class DriverState {
     while (this.yawns.length && f.t - this.yawns[0] > c.yawn_window_s) this.yawns.shift();
     const recentYawn = this.yawns.length > 0 && f.t - this.yawns[this.yawns.length - 1] < c.yawn_notice_s;
 
-    const [dYaw, dPitch, dGaze, awayFor] = this.attention(f, calibrating);
+    const [dYaw, dPitch, dGaze, awayFor] = this.attention(f);
 
     const phoneFor = this.phone.update(!!f.phoneNearFace, f.t);
     const phoneDownFor = this.phoneDown.update(!!f.phone && dPitch < -c.pitch_down_limit_deg * 0.6, f.t);
@@ -296,23 +328,25 @@ export class DriverState {
       reasons.push(why);
     };
 
-    if (!calibrating) {
-      if (closedFor >= c.microsleep_s) raise(Level.ALERT, `Eyes closed ${closedFor.toFixed(1)}s`);
-      if (phoneFor >= c.phone_s || phoneDownFor >= c.phone_down_s) raise(Level.ALERT, "Phone in use");
-      else if (earHandFor >= c.hand_at_ear_s) raise(Level.ALERT, "Phone call");
-      if (awayFor >= c.distraction_s && !reasons.includes("Phone in use")) raise(Level.ALERT, "Eyes off road");
-      if (missingFor >= c.no_face_s) raise(Level.WARN, "Driver not visible");
-      if (perclos >= c.perclos_warn) raise(Level.WARN, `Fatigue: PERCLOS ${Math.round(perclos * 100)}%`);
-      if (this.yawns.length >= c.yawn_warn_count) raise(Level.WARN, `Fatigue: ${this.yawns.length} yawns`);
-      else if (recentYawn) raise(Level.WARN, "Yawn");
-    }
+    // Alerts are live from the first frame: until the baseline is learned they run on the textbook
+    // thresholds, so a driver who is already asleep when the monitor starts is not ignored.
+    if (closedFor >= c.microsleep_s) raise(Level.ALERT, `Eyes closed ${closedFor.toFixed(1)}s`);
+    if (phoneFor >= c.phone_s || phoneDownFor >= c.phone_down_s) raise(Level.ALERT, "Phone in use");
+    else if (earHandFor >= c.hand_at_ear_s) raise(Level.ALERT, "Phone call");
+    if (awayFor >= c.distraction_s && !reasons.includes("Phone in use")) raise(Level.ALERT, "Eyes off road");
+    if (missingFor >= c.no_face_alert_s) raise(Level.ALERT, "Driver not visible");
+    else if (missingFor >= c.no_face_s) raise(Level.WARN, "Driver not visible");
+    if (perclos >= c.perclos_warn) raise(Level.WARN, `Fatigue: PERCLOS ${Math.round(perclos * 100)}%`);
+    if (this.yawns.length >= c.yawn_warn_count) raise(Level.WARN, `Fatigue: ${this.yawns.length} yawns`);
+    else if (recentYawn) raise(Level.WARN, "Yawn");
 
     return {
       level, reasons, calibrating,
       eyesClosed: closed, earThreshold: thr, perclos,
       yawns: this.yawns.length, closedFor, awayFor,
       yaw: dYaw, pitch: dPitch, gaze: dGaze, yawning,
-      calibrationProgress: calibrating && this.start !== null ? Math.min(1, (f.t - this.start) / c.calibration_s) : 1,
+      calibrationProgress: calibrating ? Math.min(1, this.calibGood / c.calib_good_s) : 1,
+      calibrationHint: calibrating ? this.calibHint : null,
     };
   }
 }

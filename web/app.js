@@ -390,10 +390,8 @@ function onResult(d) {
   draw(reading, s, fresh ? phone : null);
   const p3 = performance.now();
   logState(s, t);
-  if (!s.calibrating) {
-    const cue = voice.update(s.reasons, t, s.yawns);
-    if (cue) say(cue, s.level === Level.ALERT);
-  }
+  const cue = voice.update(s.reasons, t, s.yawns); // live during calibration too: a sleeping driver is not ignored
+  if (cue) say(cue, s.level === Level.ALERT);
   if (done - lastUi > 66) {
     lastUi = done;
     renderPanel(reading, s, fresh ? phone : null);
@@ -552,12 +550,13 @@ function setReading(key, value, hot = false, alert = false) {
 const LABEL = { 0: "Attentive", 1: "Caution", 2: "Alert" };
 
 function renderPanel(r, s, ph) {
-  const level = s.calibrating ? -1 : s.level;
+  const learning = s.calibrating && s.level === Level.OK; // alerts take over the status while calibrating
+  const level = learning ? -1 : s.level;
   $("status-dot").dataset.level = level;
   stage.dataset.level = Math.max(0, level);
-  $("status-label").textContent = s.calibrating ? "Calibrating" : LABEL[s.level];
-  $("status-sub").textContent = s.calibrating
-    ? (r ? "Look at the road as you normally would" : "Looking for a face")
+  $("status-label").textContent = learning ? "Calibrating" : LABEL[s.level];
+  $("status-sub").textContent = learning
+    ? (s.calibrationHint || "Hold your normal driving pose")
     : s.reasons.length ? s.reasons.join(" · ") : "Eyes on the road";
   $("calib").hidden = !s.calibrating;
   $("calib-fill").style.width = `${s.calibrationProgress * 100}%`;
@@ -574,7 +573,7 @@ function renderPanel(r, s, ph) {
   $("fps").textContent = fps ? Math.round(fps) : "–";
 
   const banner = $("banner");
-  if (!s.calibrating && s.level > Level.OK && s.reasons.length) {
+  if (s.level > Level.OK && s.reasons.length) {
     const cue = s.reasons.map(cueFor).find(Boolean);
     const headline = cue ? cue.headline : s.reasons[0];
     const detail = s.reasons.join("  ·  ");
@@ -602,7 +601,7 @@ const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStar
 // ---- event log --------------------------------------------------------------
 
 function logState(s, t) {
-  if (s.calibrating) return;
+  if (s.calibrating && s.level === Level.OK) return;
   const key = `${s.level}|${s.reasons.map((r) => r.replace(/ [\d.]+s?%?$/, "")).join("|")}`;
   if (key === lastKey) return;
   const first = lastKey === "";

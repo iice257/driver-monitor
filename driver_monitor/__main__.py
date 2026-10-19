@@ -84,11 +84,10 @@ def main() -> None:
                         f.phone_near_face = phone_near_face(phone.phones, face.box)
                         f.hand_at_ear = any(hand_at_ear(hd, face.box) for hd in phone.hands)
                 status = state.update(f)
-                if not status.calibrating:
-                    alarm.update(status.reasons, t, urgent=status.level == Level.ALERT, yawns=status.yawns)
+                alarm.update(status.reasons, t, urgent=status.level == Level.ALERT, yawns=status.yawns)
 
                 key = (status.level, tuple(r.split(" ")[0] for r in status.reasons))
-                if log and key != last_key and not status.calibrating:
+                if log and key != last_key:
                     log.write(json.dumps({"t": round(t, 2), "level": status.level.name, "reasons": status.reasons}) + "\n")
                     last_key = key
 

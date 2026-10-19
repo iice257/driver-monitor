@@ -163,11 +163,11 @@ def draw(img: np.ndarray, face: FaceReading | None, s: Status, fps: float,
                 LEVEL_COLOR[Level.ALERT] if n_phones else MUTED, 1, AA)
 
     # Alert banner and flashing frame border
-    if s.level > Level.OK and s.reasons and not s.calibrating:
+    if s.level > Level.OK and s.reasons:
         _alert_overlay(img, s, t)
 
-    if s.calibrating:
-        msg = "Calibrating: look at the road as you normally would"
+    if s.calibrating and s.level == Level.OK:
+        msg = s.calibration_hint or "Calibrating: hold your normal driving pose"
         (tw, th), _ = cv2.getTextSize(msg, FONT, 0.55, 1)
         by1 = h - 16
         _blend_rect(img, 16, by1 - th - 26, min(w - 16, 16 + tw + 32), by1, (18, 18, 18), 0.62)

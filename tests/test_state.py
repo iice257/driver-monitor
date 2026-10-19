@@ -214,3 +214,95 @@ def test_perclos_needs_history():
     st, t = calibrated()
     s, t = run(st, 3.0, t, ear=CLOSED)  # mostly closed, but only a few seconds of history
     assert not any(r.startswith("Fatigue: PERCLOS") for r in s.reasons)
+
+
+# --- calibration validation, squint cap, pose gating, no-face escalation -----
+
+def _calibrate_through(st, bad_s, **bad):
+    """A bad stretch first, then a clean one; returns the status after calibration finished."""
+    s, t = run(st, bad_s, **bad)
+    assert s.calibrating, "bad frames must not complete calibration"
+    s, t = run(st, 3.0, t)
+    return s, t
+
+
+def test_calibrating_through_a_yawn_does_not_poison_the_baseline():
+    st = DriverState(Config())
+    s, t = _calibrate_through(st, 3.0, jaw_open=0.8, mar=0.9)
+    assert not s.calibrating
+    assert st.baseline_ear == OPEN and abs(st.baseline_yaw) < 1e-9
+
+
+def test_calibrating_with_eyes_closed_does_not_poison_the_baseline():
+    st = DriverState(Config())
+    s, t = _calibrate_through(st, 3.0, ear=CLOSED, blink=0.9)
+    assert st.baseline_ear == OPEN and st.threshold() == OPEN * 0.72
+
+
+def test_calibrating_with_the_head_turned_does_not_poison_the_baseline():
+    st = DriverState(Config())
+    s, t = _calibrate_through(st, 3.0, yaw=40, pitch=-20)
+    assert abs(st.baseline_yaw) < 1e-9 and abs(st.baseline_pitch) < 1e-9
+
+
+def test_calibration_says_what_is_wrong():
+    for signals, hint in [
+        (dict(face=False), "Face the camera"),
+        (dict(ear=CLOSED, blink=0.9), "Open your eyes"),
+        (dict(jaw_open=0.7), "Close your mouth"),
+        (dict(yaw=30), "Look at the road"),
+    ]:
+        s, _ = run(DriverState(Config()), 1.0, **signals)
+        assert s.calibrating and s.calibration_hint == hint
+
+
+def test_calibration_needs_good_time_inside_a_rolling_window():
+    st = DriverState(Config())
+    t = 0.0
+    for _ in range(4):  # 1 s good, 1.5 s bad, repeated: never 2 s of good inside 8 s
+        s, t = run(st, 0.4, t)
+        s, t = run(st, 2.5, t, yaw=40)
+    assert s.calibrating
+    s, t = run(st, 3.0, t)
+    assert not s.calibrating
+
+
+def test_microsleep_during_calibration_still_alerts_on_the_textbook_threshold():
+    st = DriverState(Config())
+    s, t = run(st, 0.5)
+    s, t = run(st, 2.0, t, ear=CLOSED, blink=0.9)
+    assert s.calibrating and s.level == Level.ALERT and any(r.startswith("Eyes closed") for r in s.reasons)
+
+
+def test_slack_jaw_is_not_a_yawn_squint():
+    st, t = calibrated()
+    s, t = run(st, 2.0, t, jaw_open=0.35, ear=CLOSED, blink=0.1)
+    assert s.level == Level.ALERT and any(r.startswith("Eyes closed") for r in s.reasons)
+
+
+def test_yawn_squint_exemption_is_capped():
+    st, t = calibrated()
+    s, t = run(st, 2.0, t, jaw_open=0.7, ear=CLOSED)
+    assert not any(r.startswith("Eyes closed") for r in s.reasons)
+    s, t = run(st, 2.0, t, jaw_open=0.7, ear=CLOSED)
+    assert any(r.startswith("Eyes closed") for r in s.reasons)
+
+
+def test_extreme_head_pose_judges_closure_from_the_blink_blendshape_only():
+    st, t = calibrated()
+    s, t = run(st, 2.0, t, yaw=-60, ear=0.77, blink=0.9)
+    assert s.eyes_closed and any(r.startswith("Eyes closed") for r in s.reasons)
+    st, t = calibrated()
+    s, t = run(st, 2.0, t, yaw=-60, ear=0.05, blink=0.1)  # EAR collapses at the profile angle: not closed
+    assert not s.eyes_closed
+    st, t = calibrated()
+    s, t = run(st, 2.0, t, pitch=-40, ear=0.05, blink=0.1)
+    assert not s.eyes_closed
+
+
+def test_driver_not_visible_warns_then_alerts():
+    st, t = calibrated()
+    s, t = run(st, 2.5, t, face=False)
+    assert s.level == Level.WARN and "Driver not visible" in s.reasons
+    s, t = run(st, 3.0, t, face=False)
+    assert s.level == Level.ALERT and "Driver not visible" in s.reasons

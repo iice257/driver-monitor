@@ -3,8 +3,15 @@
 # Head and gaze limits are relative to the pose learned during calibration.
 
 [general]
-calibration_s = 3.0
 smoothing = 0.35            # 0..1, lower = smoother but laggier head/gaze
+
+[calibration]
+calib_good_s = 2.0          # seconds of attentive frames needed to learn your baseline ...
+calib_window_s = 8.0        # ... within this rolling window
+calib_ear_min = 0.2         # eyes clearly open (or blink blendshape below calib_blink_max)
+calib_blink_max = 0.3
+calib_jaw_max = 0.2         # mouth closed
+calib_pose_deg = 15.0       # head near frontal
 
 [eyes]
 ear_ratio = 0.72            # eyes "closed" below this fraction of your open-eye EAR
@@ -22,7 +29,9 @@ yawn_min_s = 1.0            # jaw open this long counts as a yawn
 yawn_notice_s = 3.0
 yawn_window_s = 300.0
 yawn_warn_count = 3
-yawn_squint_s = 6.0         # eyes shut during a yawn up to this long aren't a microsleep
+yawn_squint_s = 2.0         # eyes shut during a real yawn up to this long aren't a microsleep
+eye_pose_yaw_deg = 30.0     # head turned past this: judge closed eyes from the blink blendshape only
+eye_pose_pitch_deg = 25.0   # ... and head down past this
 
 [attention]
 yaw_limit_deg = 25.0        # head turned left/right
@@ -31,7 +40,8 @@ pitch_up_limit_deg = 25.0
 gaze_limit = 0.45           # eyes turned without moving the head, -1..1
 hysteresis = 0.75
 distraction_s = 2.0
-no_face_s = 2.0
+no_face_s = 2.0             # driver not visible: WARN
+no_face_alert_s = 5.0       # ... then ALERT
 
 [phone]
 phone_s = 1.0               # phone near the face this long -> ALERT

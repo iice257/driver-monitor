@@ -168,10 +168,9 @@ def annotate(reel: Path, out: Path, cuts: list[float], cfg: Config, model: Path)
                 if face.blendshapes:
                     f.blink, f.jaw_open = face.blink, face.jaw_open
             s = state.update(f)
-            if not s.calibrating:
-                cue = voice.update(s.reasons, t, s.yawns)
-                if cue is not None:
-                    said.append((t, cue.phrase))
+            cue = voice.update(s.reasons, t, s.yawns)
+            if cue is not None:
+                said.append((t, cue.phrase))
             hud.draw(frame, face, s, rate, None, cfg, t)
             if writer is None:
                 writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), rate, frame.shape[1::-1])
