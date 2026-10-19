@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "driver-monitor"
+version = "0.2.0"
+description = "Real-time driver drowsiness and distraction monitor (MediaPipe face mesh, phone detection, spoken alerts)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+    "opencv-python==5.0.0.93",
+    "mediapipe==1.1.1",
+    "numpy==2.5.4",
+    "pyttsx3==2.99",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "ruff==0.17.1"]
+reel = ["edge-tts==7.3.1", "pillow==13.0.0"]
+
+[project.scripts]
+driver-monitor = "driver_monitor.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["driver_monitor*"]
+
+[tool.setuptools.package-data]
+driver_monitor = ["voice/*.wav", "voice/manifest.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 150
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E741", "B905"]

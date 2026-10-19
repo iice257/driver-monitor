@@ -79,7 +79,7 @@ class Config:
     phone_grace_s: float = 0.6       # tolerate detector dropouts this long
 
     @classmethod
-    def load(cls, path: Path | None) -> "Config":
+    def load(cls, path: Path | None) -> Config:
         if path is None or not Path(path).exists():
             return cls()
         data = tomllib.loads(Path(path).read_text(encoding="utf-8"))

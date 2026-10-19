@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -29,12 +30,26 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-alarm", action="store_true", help="disable the spoken / audible alarm")
     p.add_argument("--beep", action="store_true", help="beep instead of speaking the alert")
     p.add_argument("--headless", action="store_true", help="no window; useful with --log on a video file")
-    p.add_argument("--record", type=Path, help="write the annotated video to this .mp4")
+    p.add_argument("--record", type=Path, help="write the annotated video (H.264, with the spoken alerts mixed in) to this .mp4; needs ffmpeg")
     p.add_argument("--log", type=Path, help="append state changes as JSON lines to this file")
     p.add_argument("--mirror", action="store_true", help="flip webcam horizontally for display")
     p.add_argument("--recalibrate-at", default="", metavar="T1,T2",
                    help="seconds at which to recalibrate, e.g. the cuts in a spliced test reel")
     return p.parse_args()
+
+
+def _finish_recording(raw: Path, out: Path, source: str | None, said: list[tuple[float, str]]) -> None:
+    """OpenCV can only write mp4v: re-encode to H.264 and mix in the spoken alerts (and the input's sound)."""
+    from .reel import encode_recording
+
+    try:
+        placed = encode_recording(raw, Path(source) if source else None, said, out)
+        raw.unlink(missing_ok=True)
+        print(f"Recorded {out} (H.264, {len(placed)} spoken alerts)")
+    except (OSError, subprocess.CalledProcessError) as exc:  # no ffmpeg: keep the raw recording
+        fallback = out.with_name(out.stem + ".mp4v.mp4")
+        raw.replace(fallback)
+        print(f"ffmpeg unavailable ({exc}); kept silent mp4v recording at {fallback}", file=sys.stderr)
 
 
 def main() -> None:
@@ -54,6 +69,8 @@ def main() -> None:
     log = args.log.open("a", encoding="utf-8") if args.log else None
     last_key: tuple | None = None
     phone_reported = False
+    said: list[tuple[float, str]] = []   # spoken alerts, mixed into --record
+    raw = args.record.with_suffix(".raw.mp4") if args.record else None
     t0 = time.monotonic()
     fps, prev = 0.0, time.monotonic()
     recal = sorted(float(x) for x in args.recalibrate_at.split(",") if x.strip())
@@ -77,8 +94,7 @@ def main() -> None:
                     phone_reported = True
                     print(f"Phone detection off: {watcher.error}", file=sys.stderr)
                     if log:
-                        log.write(json.dumps({"t": round(t, 2), "level": "INFO", "reasons": ["Phone detection off"]}) + "
-")
+                        log.write(json.dumps({"t": round(t, 2), "level": "INFO", "reasons": ["Phone detection off"]}) + "\n")
                 watcher.submit(frame, t)
                 phone = watcher.latest()
                 fresh = abs(t - phone.t) < 1.0
@@ -92,7 +108,9 @@ def main() -> None:
                         f.phone_near_face = phone_near_face(phone.phones, face.box)
                         f.hand_at_ear = any(hand_at_ear(hd, face.box) for hd in phone.hands)
                 status = state.update(f)
-                alarm.update(status.reasons, t, urgent=status.level == Level.ALERT, yawns=status.yawns)
+                cue = alarm.update(status.reasons, t, urgent=status.level == Level.ALERT, yawns=status.yawns)
+                if cue is not None:
+                    said.append((t, cue.phrase))
 
                 key = (status.level, tuple(r.split(" ")[0] for r in status.reasons))
                 if log and key != last_key:
@@ -108,7 +126,7 @@ def main() -> None:
                     if writer is None:
                         h, w = frame.shape[:2]
                         rate = cap.get(cv2.CAP_PROP_FPS) or 30
-                        writer = cv2.VideoWriter(str(args.record), cv2.VideoWriter_fourcc(*"mp4v"), rate, (w, h))
+                        writer = cv2.VideoWriter(str(raw), cv2.VideoWriter_fourcc(*"mp4v"), rate, (w, h))
                     writer.write(frame)
 
                 if not args.headless:
@@ -125,6 +143,7 @@ def main() -> None:
         cap.release()
         if writer:
             writer.release()
+            _finish_recording(raw, args.record, source if is_file else None, said)
         if log:
             log.close()
         cv2.destroyAllWindows()

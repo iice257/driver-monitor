@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,7 +13,16 @@ from mediapipe.tasks.python import BaseOptions, vision
 
 from . import metrics
 
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+
+def _models_dir() -> Path:
+    """models/ in a source checkout, else $DRIVER_MONITOR_MODELS, else ~/.driver-monitor/models (pip install)."""
+    if os.environ.get("DRIVER_MONITOR_MODELS"):
+        return Path(os.environ["DRIVER_MONITOR_MODELS"])
+    root = Path(__file__).resolve().parent.parent
+    return root / "models" if (root / "pyproject.toml").exists() else Path.home() / ".driver-monitor" / "models"
+
+
+MODELS_DIR = _models_dir()
 DEFAULT_MODEL = MODELS_DIR / "face_landmarker.task"
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
@@ -96,7 +106,7 @@ class FaceTracker:
     def close(self) -> None:
         self._landmarker.close()
 
-    def __enter__(self) -> "FaceTracker":
+    def __enter__(self) -> FaceTracker:
         return self
 
     def __exit__(self, *exc) -> None:

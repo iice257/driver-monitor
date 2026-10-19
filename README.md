@@ -49,9 +49,9 @@ The decision logic in [`state.py`](driver_monitor/state.py) is pure Python with 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt            # exact pins; or: pip install -e .  for the driver-monitor command
 python -m driver_monitor.download_model
-python -m driver_monitor
+python -m driver_monitor                   # or: driver-monitor
 ```
 
 Keys: `q` quits, `c` recalibrates.
@@ -62,7 +62,7 @@ Keys: `q` quits, `c` recalibrates.
 python -m driver_monitor --source 1                    # another camera
 python -m driver_monitor --source drive.mp4            # a recorded video
 python -m driver_monitor --source drive.mp4 --headless --log events.jsonl
-python -m driver_monitor --record out.mp4              # save the annotated video
+python -m driver_monitor --record out.mp4              # annotated video as H.264 with the spoken alerts mixed in (needs ffmpeg)
 python -m driver_monitor --no-alarm --mirror
 python -m driver_monitor --beep                        # beeps instead of spoken alerts
 python -m driver_monitor --phone yolo                  # YOLO phone detector (pip install ultralytics, AGPL-3.0)
@@ -86,15 +86,16 @@ The HUD shows each live signal with its threshold marker. Watch where your value
 
 ```bash
 python -m driver_monitor.evaluate samples/scenarios.json         # each clip raises what it should, and nothing it shouldn't
-python -m driver_monitor.reel samples/scenarios.json --web web/demo
+python -m driver_monitor.reel samples/scenarios.json         # writes web/demo/{reel,showcase}.mp4, poster.jpg, chapters.json
 ```
 
-`reel` joins the clips in scenario order as one continuous drive (`reel.mp4`, which the web demo analyses live). Each cut is a short dissolve, and a single uniform cabin ambience runs underneath, looped from one clip with crossfades away from the cuts. It also renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the ambience. `--web` also refreshes the site's poster and chapter list.
+`reel` joins the clips in scenario order as one continuous drive (`reel.mp4`, which the web demo analyses live). Each cut is a short dissolve, and a single uniform cabin ambience runs underneath, looped from one clip with crossfades away from the cuts. It also renders `showcase.mp4`: the same footage with the HUD, alert banners and spoken alerts mixed over the ambience. The videos live only in `web/demo`; `samples/` holds the source clips.
 
 ## Tests
 
 ```bash
-pip install pytest
+pip install -r requirements-dev.txt
+ruff check .
 pytest -q
 ```
 
@@ -113,7 +114,7 @@ driver_monitor/
   evaluate.py       scenario checks against the sample clips
   reel.py           builds the demo reel and the annotated showcase video
   __main__.py       CLI
-tests/              unit tests for metrics, state logic and the alert voice
+tests/              unit tests for metrics, state logic, alert policy, and a Python-vs-JavaScript parity test (needs node)
 web/                static browser demo (MediaPipe in the page), deployed on Vercel
 ```
 

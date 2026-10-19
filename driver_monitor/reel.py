@@ -2,7 +2,7 @@
 
     python -m driver_monitor.reel samples/scenarios.json
 
-Writes, next to the scenarios file:
+Writes to web/demo (or --out):
   reel.mp4      the clips as one continuous, seamlessly looping drive: muted, mirrored so
                 the driver sits on the left, cut where the poses match, dissolved, with
                 one steady cabin ambience underneath. The web demo analyses this one
@@ -12,15 +12,14 @@ Writes, next to the scenarios file:
                 border drawn on every frame, and each alert spoken in the pre-rendered
                 voice (voice.py) over the ambience, exactly when the live alarm would.
 
-With --web DIR it also refreshes DIR/reel.mp4, DIR/showcase.mp4, DIR/poster.jpg and
-DIR/chapters.json for the static site. Phone detection is off, as in evaluate.py.
+It also writes poster.jpg and chapters.json for the static site. The videos live only
+there; samples/ holds the source clips. Phone detection is off, as in evaluate.py.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import tempfile
 import wave
@@ -35,6 +34,8 @@ from .detector import DEFAULT_MODEL, FaceTracker
 from .evaluate import DEFAULT_CONFIG
 from .state import Config, DriverState, Frame
 from .voice import clip_for
+
+DEFAULT_OUT = Path(__file__).resolve().parent.parent / "web" / "demo"
 
 W, H, FPS, RATE = 1280, 720, 30, 48000
 
@@ -83,7 +84,7 @@ def best_cuts(clips: list[Path], min_ends: list[float], head: float = 1.5) -> li
         a, b = thumbs[i], thumbs[j]
         lo = min(int(min_ends[i] * rates[i]), len(a) - 1)
         heads = range(0, min(int(head * rates[j]), len(b) - 1) + 1)
-        best = min(((float(np.abs(a[e] - b[s]).mean()), e, s) for e in range(lo, len(a)) for s in heads))
+        best = min((float(np.abs(a[e] - b[s]).mean()), e, s) for e in range(lo, len(a)) for s in heads)
         ends[i], starts[j] = best[1], best[2]
     return [(s / r, (e + 1) / r) for s, e, r in zip(starts, ends, rates)]
 
@@ -208,25 +209,44 @@ def wav_seconds(path: Path) -> float:
         return w.getnframes() / w.getframerate()
 
 
-def mix(video: Path, reel: Path, said: list[tuple[float, str]], voices: dict[str, Path], out: Path) -> list[tuple[float, str]]:
-    """Mux the annotated video with the reel's sound, ducked, plus each phrase at its time."""
-    inputs = ["-i", str(video), "-i", str(reel)]
-    chains = [f"[1:a]volume=0.7[bed]"]
-    labels, placed, free_at = ["[bed]"], [], 0.0
+def mix(video: Path, bed: Path | None, said: list[tuple[float, str]], voices: dict[str, Path], out: Path) -> list[tuple[float, str]]:
+    """H.264 mux of the annotated video with the bed's sound (ducked, if any) plus each phrase at its time."""
+    inputs = ["-i", str(video)]
+    chains, labels, placed, free_at = [], [], [], 0.0
+    if bed is not None:
+        inputs += ["-i", str(bed)]
+        chains.append("[1:a]volume=0.7[bed]")
+        labels.append("[bed]")
+    first = len(inputs) // 2
     for i, (t, phrase) in enumerate(said):
         at = max(t, free_at)  # one voice: never talk over the previous phrase
         free_at = at + wav_seconds(voices[phrase]) + 0.2
         placed.append((round(at, 2), phrase))
         inputs += ["-i", str(voices[phrase])]
         ms = int(at * 1000)
-        chains.append(f"[{i + 2}:a]aformat=sample_rates={RATE}:channel_layouts=stereo,"
+        chains.append(f"[{first + i}:a]aformat=sample_rates={RATE}:channel_layouts=stereo,"
                       f"adelay={ms}|{ms},volume=1.8[s{i}]")
         labels.append(f"[s{i}]")
-    chains.append(f"{''.join(labels)}amix=inputs={len(labels)}:duration=first:normalize=0,alimiter=limit=0.95[a]")
-    ffmpeg(*inputs, "-filter_complex", ";".join(chains), "-map", "0:v", "-map", "[a]",
-           "-c:v", "libx264", "-crf", "22", "-preset", "slow", "-pix_fmt", "yuv420p",
-           "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(out))
+    video_args = ["-c:v", "libx264", "-crf", "22", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+    if not labels:
+        ffmpeg(*inputs, "-map", "0:v", *video_args, "-an", str(out))
+        return placed
+    mixed = labels[0] if len(labels) == 1 else f"{''.join(labels)}amix=inputs={len(labels)}:duration={'first' if bed else 'longest'}:normalize=0"
+    chains.append(f"{mixed},alimiter=limit=0.95[a]" if len(labels) > 1 else f"{mixed}alimiter=limit=0.95[a]")
+    ffmpeg(*inputs, "-filter_complex", ";".join(chains), "-map", "0:v", "-map", "[a]", *video_args,
+           "-c:a", "aac", "-b:a", "160k", "-shortest", str(out))
     return placed
+
+
+def encode_recording(raw: Path, source_audio: Path | None, said: list[tuple[float, str]], out: Path) -> list[tuple[float, str]]:
+    """Turn the HUD recording (mp4v from OpenCV) into H.264 with the spoken alerts mixed in.
+
+    `source_audio` is the original video when the input was a file (its sound becomes the bed).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        voices = synthesize({phrase for _, phrase in said}, Path(tmp)) if said else {}
+        bed = source_audio if source_audio is not None and probe(source_audio)[1] else None
+        return mix(raw, bed, said, voices, out)
 
 
 def main() -> None:
@@ -234,7 +254,7 @@ def main() -> None:
     p.add_argument("spec", type=Path, help="scenarios JSON (clip order = reel order)")
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     p.add_argument("--model", type=Path, default=DEFAULT_MODEL)
-    p.add_argument("--web", type=Path, help="also refresh the static site's demo folder, e.g. web/demo")
+    p.add_argument("--out", type=Path, default=DEFAULT_OUT, help="where reel.mp4, showcase.mp4, poster.jpg and chapters.json go (default: web/demo)")
     p.add_argument("--ambience", default=None, help="sound file to loop as the ambience (default: synthesised cabin noise)")
     p.add_argument("--xfade", type=float, default=0.6, help="dissolve between scenarios, seconds")
     args = p.parse_args()
@@ -242,7 +262,8 @@ def main() -> None:
     folder = args.spec.parent
     scenarios = json.loads(args.spec.read_text(encoding="utf-8"))
     clips = [folder / sc["clip"] for sc in scenarios]
-    reel, showcase = folder / "reel.mp4", folder / "showcase.mp4"
+    args.out.mkdir(parents=True, exist_ok=True)
+    reel, showcase = args.out / "reel.mp4", args.out / "showcase.mp4"
 
     cuts = best_cuts(clips, [sc.get("min_end", 0.0) for sc in scenarios])
     ambience = folder / args.ambience if args.ambience else None
@@ -262,17 +283,13 @@ def main() -> None:
     for t, phrase in placed:
         print(f"  {t:5.1f}s  {phrase}")
 
-    if args.web:
-        args.web.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(reel, args.web / "reel.mp4")
-        shutil.copyfile(showcase, args.web / "showcase.mp4")
-        ffmpeg("-ss", "1.5", "-i", str(reel), "-frames:v", "1", "-q:v", "3", str(args.web / "poster.jpg"))
-        ends = starts[1:] + [total]
-        chapters = [{"label": sc["label"], "start": round(s, 2), "end": round(e, 2), "expect": sc.get("summary", "")}
-                    for sc, s, e in zip(scenarios, starts, ends)]
-        (args.web / "chapters.json").write_text(
-            "[\n" + ",\n".join("  " + json.dumps(c, ensure_ascii=False) for c in chapters) + "\n]\n", encoding="utf-8")
-        print(f"refreshed {args.web}: reel.mp4, showcase.mp4, poster.jpg, chapters.json")
+    ffmpeg("-ss", "1.5", "-i", str(reel), "-frames:v", "1", "-q:v", "3", str(args.out / "poster.jpg"))
+    ends = starts[1:] + [total]
+    chapters = [{"label": sc["label"], "start": round(s, 2), "end": round(e, 2), "expect": sc.get("summary", "")}
+                for sc, s, e in zip(scenarios, starts, ends, strict=True)]
+    (args.out / "chapters.json").write_text(
+        "[\n" + ",\n".join("  " + json.dumps(c, ensure_ascii=False) for c in chapters) + "\n]\n", encoding="utf-8")
+    print(f"wrote {args.out}: reel.mp4, showcase.mp4, poster.jpg, chapters.json")
 
 
 if __name__ == "__main__":

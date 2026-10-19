@@ -175,3 +175,25 @@ def test_phone_watcher_survives_a_backend_that_cannot_be_built(monkeypatch):
     w = phone.PhoneWatcher()
     assert "model missing" in w.error
     w.close()
+
+
+def test_recording_is_h264_with_the_spoken_alerts_mixed_in(tmp_path):
+    import shutil
+    import subprocess
+
+    import pytest
+
+    from driver_monitor.reel import encode_recording, probe
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed")
+    raw = tmp_path / "raw.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30:d=6",
+                    "-pix_fmt", "yuv420p", str(raw)], check=True)
+    out = tmp_path / "out.mp4"
+    placed = encode_recording(raw, None, [(1.0, "Yawning detected, please drive carefully.")], out)
+    assert placed == [(1.0, "Yawning detected, please drive carefully.")]
+    codecs = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(out)],
+                            capture_output=True, text=True, check=True).stdout.split()
+    assert set(codecs) == {"h264", "aac"}
+    assert probe(out)[1]

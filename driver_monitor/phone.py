@@ -16,7 +16,6 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import cv2
 import mediapipe as mp
@@ -75,7 +74,7 @@ log = logging.getLogger(__name__)
 
 class _MediaPipeBackend:
     def __init__(self, score: float) -> None:
-        for path, url in ((OBJECT_MODEL, OBJECT_MODEL_URL), (HAND_MODEL, HAND_MODEL_URL)):
+        for path, _url in ((OBJECT_MODEL, OBJECT_MODEL_URL), (HAND_MODEL, HAND_MODEL_URL)):
             if not path.exists():
                 raise FileNotFoundError(f"{path.name} missing. Run: python -m driver_monitor.download_model")
         self._objects = vision.ObjectDetector.create_from_options(

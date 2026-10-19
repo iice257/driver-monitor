@@ -11,7 +11,6 @@ and VoicePolicy decides what to say and how often. The voice, best first:
 
 from __future__ import annotations
 
-import queue
 import sys
 import threading
 import time
