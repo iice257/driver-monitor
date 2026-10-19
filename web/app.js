@@ -1,12 +1,9 @@
-import { FaceLandmarker, FilesetResolver, HandLandmarker, ObjectDetector } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 import {
   DEFAULTS, DriverState, Level, LEFT_EYE_CONTOUR, LEFT_IRIS, MOUTH_CONTOUR, RIGHT_EYE_CONTOUR, RIGHT_IRIS,
   VoicePolicy, cueFor, handAtEar, phoneNearFace, readFace,
 } from "./engine.js";
 
-const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const MODELS = "https://storage.googleapis.com/mediapipe-models";
-const PHONE_EVERY = 4; // run the heavier phone/hand models on every Nth frame
+const PHONE_EVERY = 8; // phone and hand models run in their own worker on every Nth frame
 
 const $ = (id) => document.getElementById(id);
 const video = $("video");
@@ -16,7 +13,7 @@ const stage = $("stage");
 
 const cfg = DEFAULTS;
 let state = new DriverState(cfg);
-let face = null, objects = null, hands = null;
+let ready = false;
 let mode = "demo";
 let chapters = [];
 let chapterIdx = -1;
@@ -130,32 +127,32 @@ function setSound(on) {
 
 // ---- models -----------------------------------------------------------------
 
-async function loadModels() {
-  const fileset = await FilesetResolver.forVisionTasks(WASM);
-  const delegate = "GPU";
-  face = await FaceLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: `${MODELS}/face_landmarker/face_landmarker/float16/latest/face_landmarker.task`, delegate },
-    runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true,
-  });
-  // Phone evidence is optional and loads in the background: the face pipeline starts without it.
-  loadPhoneModels(fileset, delegate);
-}
+// Inference runs in worker.js. One frame is in flight at a time; frames that arrive while it
+// is busy are skipped, so the page never queues work it cannot finish.
+let worker = null, phoneWorker = null, phoneReady = false, busy = false, phoneBusy = false, nextId = 0, inflight = null;
+let phoneJob = null;
 
-async function loadPhoneModels(fileset, delegate) {
-  try {
-    [objects, hands] = await Promise.all([
-      ObjectDetector.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: `${MODELS}/object_detector/efficientdet_lite0/float16/latest/efficientdet_lite0.tflite`, delegate },
-        runningMode: "VIDEO", scoreThreshold: 0.35, categoryAllowlist: ["cell phone"], maxResults: 3,
-      }),
-      HandLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: `${MODELS}/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task`, delegate },
-        runningMode: "VIDEO", numHands: 2,
-      }),
-    ]);
-  } catch (err) {
-    console.warn("Phone detection unavailable", err);
-  }
+function loadModels() {
+  return new Promise((resolve, reject) => {
+    worker = new Worker("/worker.js");
+    worker.onerror = (e) => reject(new Error(e.message || "worker failed"));
+    worker.onmessage = (e) => {
+      const d = e.data;
+      if (d.type === "ready") resolve();
+      else if (d.type === "error") reject(new Error(d.message));
+      else if (d.type === "result") onResult(d);
+    };
+    worker.postMessage({ type: "init", role: "face" });
+    // Phone evidence is optional and loads in its own worker: the face pipeline starts without it.
+    phoneWorker = new Worker("/worker.js");
+    phoneWorker.onerror = () => {};
+    phoneWorker.onmessage = (e) => {
+      const d = e.data;
+      if (d.type === "phone-ready") phoneReady = true;
+      else if (d.type === "result") onPhone(d);
+    };
+    phoneWorker.postMessage({ type: "init", role: "phone" });
+  });
 }
 
 // ---- veil -------------------------------------------------------------------
@@ -294,20 +291,10 @@ if (FRAME_CB) {
 // The models see a 640 px wide copy of the frame: landmarks come back normalised, so the
 // precision is the same, and uploading a quarter of the pixels is most of the per-frame cost.
 const INPUT_W = new URLSearchParams(location.search).has("fullres") ? 0 : 640;
-const input = document.createElement("canvas");
-const inputCtx = input.getContext("2d", { alpha: false, desynchronized: true });
-
-function frameInput() {
-  if (!INPUT_W || video.videoWidth <= INPUT_W) return video;
-  const ih = Math.round((video.videoHeight / video.videoWidth) * INPUT_W);
-  if (input.width !== INPUT_W || input.height !== ih) [input.width, input.height] = [INPUT_W, ih];
-  inputCtx.drawImage(video, 0, 0, INPUT_W, ih);
-  return input;
-}
 
 function tick() {
   requestAnimationFrame(tick);
-  if (!face || video.readyState < 2 || video.paused || video.ended) return;
+  if (!ready || busy || video.readyState < 2 || video.paused || video.ended) return;
   if (video.videoWidth === 0) return;
   if (!newFrame) return;
   newFrame = !FRAME_CB;
@@ -334,26 +321,53 @@ function tick() {
     canvas.height = video.videoHeight;
   }
   const w = canvas.width, h = canvas.height;
-  const p0 = performance.now();
-  const frame = frameInput();
-  const reading = readFace(face.detectForVideo(frame, now), w, h);
-  const p1 = performance.now();
-
+  const iw = INPUT_W && w > INPUT_W ? INPUT_W : w, ih = Math.round((h / w) * iw);
+  busy = true;
+  const id = ++nextId;
   frameNo++;
-  if (objects && hands && frameNo % PHONE_EVERY === 0) {
-    const det = objects.detectForVideo(frame, now);
-    const hr = hands.detectForVideo(frame, now);
-    phone = {
-      t,
-      phones: (det.detections || []).map((d) => ({
-        // Detector boxes are in the input's pixels; scale them back to the video's.
-        box: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.originX + d.boundingBox.width, d.boundingBox.originY + d.boundingBox.height].map((v) => (v * w) / frame.width),
-        score: d.categories[0]?.score || 0,
-      })),
-      hands: (hr.landmarks || []).map((lm) => lm.map((p) => [p.x * w, p.y * h])),
-    };
+  inflight = { id, t, w, h, mode };
+  const size = { resizeWidth: iw, resizeHeight: ih, resizeQuality: "low" };
+  createImageBitmap(video, size).then(
+    (bitmap) => worker.postMessage({ type: "frame", id, bitmap, ts: now, role: "face" }, [bitmap]),
+    () => { busy = false; },
+  );
+  if (phoneReady && !phoneBusy && frameNo % PHONE_EVERY === 0) {
+    phoneBusy = true;
+    phoneJob = { id, t, w, h, mode };
+    createImageBitmap(video, size).then(
+      (bitmap) => phoneWorker.postMessage({ type: "frame", id, bitmap, ts: now, role: "phone" }, [bitmap]),
+      () => { phoneBusy = false; },
+    );
   }
-  const p2 = performance.now();
+}
+
+function onPhone(d) {
+  phoneBusy = false;
+  const job = phoneJob;
+  if (!job || job.id !== d.id || job.mode !== mode || !d.ph) return;
+  const { t, w, h } = job, k = w / d.bw;
+  phone = {
+    t,
+    phones: d.ph.phones.map((p) => ({ box: p.box.map((v) => v * k), score: p.score })),
+    hands: d.ph.hands.map((l) => l.map(([x, y]) => [x * w, y * h])),
+  };
+  if (PERF) perf.phone.push(d.ms2 ?? d.msAll);
+}
+
+function onResult(d) {
+  busy = false;
+  const job = inflight;
+  if (!job || job.id !== d.id || job.mode !== mode) return;
+  const { t, w, h } = job;
+  const p0 = performance.now();
+
+  let reading = null;
+  if (d.face) {
+    const lm = [];
+    for (let i = 0; i < d.face.xyz.length; i += 3) lm.push({ x: d.face.xyz[i], y: d.face.xyz[i + 1], z: d.face.xyz[i + 2] });
+    const categories = Object.entries(d.face.shapes).map(([categoryName, score]) => ({ categoryName, score }));
+    reading = readFace({ faceLandmarks: [lm], faceBlendshapes: [{ categories }] }, w, h);
+  }
   const fresh = Math.abs(t - phone.t) < 1;
 
   const f = { t, face: !!reading, ear: 0, mar: 0, pitch: 0, yaw: 0, gaze: 0, blink: null, jawOpen: null, phone: fresh && phone.phones.length > 0 };
@@ -366,8 +380,9 @@ function tick() {
   }
   const s = state.update(f);
 
-  const dt = now - lastFrameAt;
-  lastFrameAt = now;
+  const done = performance.now();
+  const dt = done - lastFrameAt;
+  lastFrameAt = done;
   if (dt > 0 && dt < 1000) fps = fps ? fps * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
   // On a slow device the reel would outrun the models; slow it down instead of skipping evidence.
   if (mode === "demo" && fps) video.playbackRate = Math.max(0.35, Math.min(1, fps / 22));
@@ -379,14 +394,14 @@ function tick() {
     const cue = voice.update(s.reasons, t, s.yawns);
     if (cue) say(cue, s.level === Level.ALERT);
   }
-  if (now - lastUi > 66) {
-    lastUi = now;
+  if (done - lastUi > 66) {
+    lastUi = done;
     renderPanel(reading, s, fresh ? phone : null);
   }
   if (PERF) {
     const p4 = performance.now();
-    perf.face.push(p1 - p0); if (p2 - p1 > 0.05) perf.phone.push(p2 - p1);
-    perf.draw.push(p3 - p2); perf.ui.push(p4 - p3); perf.total.push(p4 - p0);
+    perf.face.push(d.ms); // worker time, off the main thread
+    perf.draw.push(p3 - p0); perf.ui.push(p4 - p3); perf.total.push(p4 - p0); // main-thread cost only
     if (dt > 0 && dt < 1000) perf.gaps.push(dt);
   }
 }
@@ -647,6 +662,7 @@ setSound(soundOn);
 veil({ text: "Loading the face model, about 4 MB", busy: true });
 Promise.all([loadModels(), loadChapters(), loadVoice()])
   .then(() => {
+    ready = true;
     const wanted = new URLSearchParams(location.search).get("mode");
     if (wanted === "camera") document.querySelector('[data-mode="camera"]').click();
     else startDemo();
