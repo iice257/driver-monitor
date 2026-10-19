@@ -10,3 +10,4 @@ models/*.pt
 *.pt
 !samples/*.mp4
 !web/demo/*.mp4
+*.egg-info/

@@ -3,4 +3,3 @@ pytest==9.1.1
 ruff==0.17.1
 # only for rebuilding the demo reel and its voice clips
 edge-tts==7.3.1
-pillow==13.0.0

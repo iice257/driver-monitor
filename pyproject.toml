@@ -13,12 +13,13 @@ dependencies = [
     "opencv-python==5.0.0.93",
     "mediapipe==1.1.1",
     "numpy==2.5.4",
+    "pillow==13.0.0",
     "pyttsx3==2.99",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "ruff==0.17.1"]
-reel = ["edge-tts==7.3.1", "pillow==13.0.0"]
+reel = ["edge-tts==7.3.1"]
 
 [project.scripts]
 driver-monitor = "driver_monitor.__main__:main"
@@ -27,7 +28,7 @@ driver-monitor = "driver_monitor.__main__:main"
 include = ["driver_monitor*"]
 
 [tool.setuptools.package-data]
-driver_monitor = ["voice/*.wav", "voice/manifest.json"]
+driver_monitor = ["voice/*.wav", "voice/manifest.json", "fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
