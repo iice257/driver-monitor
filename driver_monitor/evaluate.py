@@ -23,12 +23,12 @@ from .state import Config, DriverState, Frame, Level
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config.toml"
 
 
-def timeline(path: Path, cfg: Config, model: Path = DEFAULT_MODEL) -> list[tuple[float, Level, list[str]]]:
-    """Every frame's (t, level, reasons) for a video file, phone detection off."""
+def frames(path: Path, model: Path = DEFAULT_MODEL) -> list[Frame]:
+    """The per-frame signal values (what DriverState consumes) for a video file, phone detection off."""
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise SystemExit(f"Could not open {path}")
-    state, out = DriverState(cfg), []
+    out = []
     with FaceTracker(model) as tracker:
         while True:
             ok, frame = cap.read()
@@ -41,10 +41,23 @@ def timeline(path: Path, cfg: Config, model: Path = DEFAULT_MODEL) -> list[tuple
                 f.ear, f.mar, f.pitch, f.yaw, f.gaze = face.ear, face.mar, face.pitch, face.yaw, face.gaze
                 if face.blendshapes:
                     f.blink, f.jaw_open = face.blink, face.jaw_open
-            s = state.update(f)
-            out.append((t, s.level, s.reasons))
+            out.append(f)
     cap.release()
     return out
+
+
+def run_state(cfg: Config, signal: list[Frame]) -> list[tuple[float, Level, list[str]]]:
+    state = DriverState(cfg)
+    out = []
+    for f in signal:
+        s = state.update(f)
+        out.append((f.t, s.level, s.reasons))
+    return out
+
+
+def timeline(path: Path, cfg: Config, model: Path = DEFAULT_MODEL) -> list[tuple[float, Level, list[str]]]:
+    """Every frame's (t, level, reasons) for a video file, phone detection off."""
+    return run_state(cfg, frames(path, model))
 
 
 def _seen(tl, prefix: str, window=None) -> list[float]:

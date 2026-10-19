@@ -189,6 +189,9 @@ const median = (xs) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+// Round half up with a hair of tolerance, so this prints the same digit as state.py.
+const halfUp = (x) => Math.floor(x + 0.5 + 1e-6);
+
 export class DriverState {
   constructor(cfg = DEFAULTS) {
     this.cfg = { ...DEFAULTS, ...cfg };
@@ -330,13 +333,13 @@ export class DriverState {
 
     // Alerts are live from the first frame: until the baseline is learned they run on the textbook
     // thresholds, so a driver who is already asleep when the monitor starts is not ignored.
-    if (closedFor >= c.microsleep_s) raise(Level.ALERT, `Eyes closed ${closedFor.toFixed(1)}s`);
+    if (closedFor >= c.microsleep_s) raise(Level.ALERT, `Eyes closed ${(halfUp(closedFor * 10) / 10).toFixed(1)}s`);
     if (phoneFor >= c.phone_s || phoneDownFor >= c.phone_down_s) raise(Level.ALERT, "Phone in use");
     else if (earHandFor >= c.hand_at_ear_s) raise(Level.ALERT, "Phone call");
     if (awayFor >= c.distraction_s && !reasons.includes("Phone in use")) raise(Level.ALERT, "Eyes off road");
     if (missingFor >= c.no_face_alert_s) raise(Level.ALERT, "Driver not visible");
     else if (missingFor >= c.no_face_s) raise(Level.WARN, "Driver not visible");
-    if (perclos >= c.perclos_warn) raise(Level.WARN, `Fatigue: PERCLOS ${Math.round(perclos * 100)}%`);
+    if (perclos >= c.perclos_warn) raise(Level.WARN, `Fatigue: PERCLOS ${halfUp(perclos * 100)}%`);
     if (this.yawns.length >= c.yawn_warn_count) raise(Level.WARN, `Fatigue: ${this.yawns.length} yawns`);
     else if (recentYawn) raise(Level.WARN, "Yawn");
 

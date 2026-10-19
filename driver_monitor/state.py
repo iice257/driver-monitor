@@ -9,6 +9,7 @@ testable against recorded or synthetic data.
 
 from __future__ import annotations
 
+import math
 import tomllib
 from collections import deque
 from dataclasses import dataclass, field, fields
@@ -21,6 +22,12 @@ class Level(IntEnum):
     OK = 0
     WARN = 1
     ALERT = 2
+
+
+
+def _half_up(x: float) -> int:
+    """Round half up, with a hair of tolerance so Python and the JS port always print the same digit."""
+    return math.floor(x + 0.5 + 1e-6)
 
 
 @dataclass
@@ -304,7 +311,7 @@ class DriverState:
         # textbook thresholds (EAR 0.21, pose relative to the camera), so a driver who is already
         # asleep when the monitor starts is not ignored.
         if closed_for >= cfg.microsleep_s:
-            raise_(Level.ALERT, f"Eyes closed {closed_for:.1f}s")
+            raise_(Level.ALERT, f"Eyes closed {_half_up(closed_for * 10) / 10:.1f}s")
         if phone_for >= cfg.phone_s or phone_down_for >= cfg.phone_down_s:
             raise_(Level.ALERT, "Phone in use")
         elif ear_hand_for >= cfg.hand_at_ear_s:
@@ -316,7 +323,7 @@ class DriverState:
         elif missing_for >= cfg.no_face_s:
             raise_(Level.WARN, "Driver not visible")
         if perclos >= cfg.perclos_warn:
-            raise_(Level.WARN, f"Fatigue: PERCLOS {perclos:.0%}")
+            raise_(Level.WARN, f"Fatigue: PERCLOS {_half_up(perclos * 100)}%")
         if len(self._yawns) >= cfg.yawn_warn_count:
             raise_(Level.WARN, f"Fatigue: {len(self._yawns)} yawns")
         elif recent_yawn:
