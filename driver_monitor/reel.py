@@ -13,7 +13,7 @@ Writes to web/demo (or --out):
                 voice (voice.py) over the ambience, exactly when the live alarm would.
 
 It also writes poster.jpg and chapters.json for the static site. The videos live only
-there; samples/ holds the source clips. Phone detection is off, as in evaluate.py.
+there; samples/ holds the source clips. The real phone and hand detectors run here and in evaluate.py.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import numpy as np
 from . import hud
 from .alerts import CUES, VoicePolicy
 from .detector import DEFAULT_MODEL, FaceTracker
-from .evaluate import DEFAULT_CONFIG
+from .evaluate import DEFAULT_CONFIG, PhoneProbe
 from .state import Config, DriverState, Frame
 from .voice import clip_for
 
@@ -154,6 +154,7 @@ def annotate(reel: Path, out: Path, cfg: Config, model: Path) -> list[tuple[floa
     rate = cap.get(cv2.CAP_PROP_FPS) or FPS
     writer = None
     state, voice, said = DriverState(cfg), VoicePolicy(), []
+    probe = PhoneProbe()
     with FaceTracker(model) as tracker:  # one drive: calibrated once on the opener, never reset at a cut
         while True:
             ok, frame = cap.read()
@@ -166,16 +167,18 @@ def annotate(reel: Path, out: Path, cfg: Config, model: Path) -> list[tuple[floa
                 f.ear, f.mar, f.pitch, f.yaw, f.gaze = face.ear, face.mar, face.pitch, face.yaw, face.gaze
                 if face.blendshapes:
                     f.blink, f.jaw_open = face.blink, face.jaw_open
+            seen = probe.update(frame, t, f, face)
             s = state.update(f)
             cue = voice.update(s.reasons, t, s.yawns)
             if cue is not None:
                 said.append((t, cue.phrase))
             note = FATIGUE_NOTE if any(r.startswith("Fatigue: 3 yawns") for r in s.reasons) else None
-            hud.draw(frame, face, s, rate, None, cfg, t, note=note)
+            hud.draw(frame, face, s, rate, seen, cfg, t, note=note)
             if writer is None:
                 writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), rate, frame.shape[1::-1])
             writer.write(frame)
     cap.release()
+    probe.close()
     if writer:
         writer.release()
     return said

@@ -18,17 +18,49 @@ from pathlib import Path
 import cv2
 
 from .detector import DEFAULT_MODEL, FaceTracker
+from .phone import PhoneResult, _MediaPipeBackend, hand_at_ear, phone_near_face
 from .state import Config, DriverState, Frame, Level
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config.toml"
 
 
+class PhoneProbe:
+    """The real phone and hand detectors, run inline every few frames (the live app runs them on a thread)."""
+
+    def __init__(self, every: int = 3, score: float = 0.35) -> None:
+        self.every, self._n, self.result = every, 0, PhoneResult()
+        try:
+            self._backend = _MediaPipeBackend(score)
+        except Exception as exc:  # models not downloaded: say so rather than silently reading "no phone"
+            print(f"Phone detection off: {exc}", file=sys.stderr)
+            self._backend = None
+
+    def update(self, frame, t: float, f: Frame, face) -> PhoneResult | None:
+        """Fill the frame's phone signals from the latest detection; returns it for drawing."""
+        if self._backend is None:
+            return None
+        if self._n % self.every == 0:
+            phones, hands = self._backend(frame)
+            self.result = PhoneResult(t=t, phones=phones, hands=hands)
+        self._n += 1
+        f.phone = bool(self.result.phones)
+        if face is not None:
+            f.phone_near_face = phone_near_face(self.result.phones, face.box)
+            f.hand_at_ear = any(hand_at_ear(hd, face.box) for hd in self.result.hands)
+        return self.result
+
+    def close(self) -> None:
+        if self._backend is not None:
+            self._backend.close()
+
+
 def frames(path: Path, model: Path = DEFAULT_MODEL) -> list[Frame]:
-    """The per-frame signal values (what DriverState consumes) for a video file, phone detection off."""
+    """The per-frame signal values (what DriverState consumes) for a video file, with the real phone detectors."""
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise SystemExit(f"Could not open {path}")
     out = []
+    probe = PhoneProbe()
     with FaceTracker(model) as tracker:
         while True:
             ok, frame = cap.read()
@@ -41,8 +73,10 @@ def frames(path: Path, model: Path = DEFAULT_MODEL) -> list[Frame]:
                 f.ear, f.mar, f.pitch, f.yaw, f.gaze = face.ear, face.mar, face.pitch, face.yaw, face.gaze
                 if face.blendshapes:
                     f.blink, f.jaw_open = face.blink, face.jaw_open
+            probe.update(frame, t, f, face)
             out.append(f)
     cap.release()
+    probe.close()
     return out
 
 
@@ -56,7 +90,7 @@ def run_state(cfg: Config, signal: list[Frame]) -> list[tuple[float, Level, list
 
 
 def timeline(path: Path, cfg: Config, model: Path = DEFAULT_MODEL) -> list[tuple[float, Level, list[str]]]:
-    """Every frame's (t, level, reasons) for a video file, phone detection off."""
+    """Every frame's (t, level, reasons) for a video file, with the real phone detectors."""
     return run_state(cfg, frames(path, model))
 
 
