@@ -31,8 +31,7 @@ import numpy as np
 from . import hud
 from .alerts import CUES, VoicePolicy
 from .detector import DEFAULT_MODEL, FaceTracker
-from .evaluate import DEFAULT_CONFIG, simulate_phone
-from .phone import PhoneResult
+from .evaluate import DEFAULT_CONFIG
 from .state import Config, DriverState, Frame
 from .voice import clip_for
 
@@ -149,7 +148,7 @@ def join(clips: list[Path], out: Path, cuts: list[tuple[float, float]], ambience
 FATIGUE_NOTE = "Demo: three yawns in seconds. In real driving the window is 5 minutes."
 
 
-def annotate(reel: Path, out: Path, cfg: Config, model: Path, phone_windows: list[list[float]] | None = None) -> list[tuple[float, str]]:
+def annotate(reel: Path, out: Path, cfg: Config, model: Path) -> list[tuple[float, str]]:
     """Run the monitor over the reel, drawing the HUD. Returns (t, phrase) for every spoken alert."""
     cap = cv2.VideoCapture(str(reel))
     rate = cap.get(cv2.CAP_PROP_FPS) or FPS
@@ -167,24 +166,12 @@ def annotate(reel: Path, out: Path, cfg: Config, model: Path, phone_windows: lis
                 f.ear, f.mar, f.pitch, f.yaw, f.gaze = face.ear, face.mar, face.pitch, face.yaw, face.gaze
                 if face.blendshapes:
                     f.blink, f.jaw_open = face.blink, face.jaw_open
-            sim = bool(face is not None and any(lo <= t <= hi for lo, hi in phone_windows or []))
-            if sim:
-                simulate_phone([f], [[t, t]])
             s = state.update(f)
             cue = voice.update(s.reasons, t, s.yawns)
             if cue is not None:
                 said.append((t, cue.phrase))
             note = FATIGUE_NOTE if any(r.startswith("Fatigue: 3 yawns") for r in s.reasons) else None
-            sim_phone = None
-            if sim:
-                x0, y0, x1, y1 = face.box
-                fw, fh = x1 - x0, y1 - y0
-                box = (x1 - 0.05 * fw, y0 + 0.5 * fh, x1 + 0.5 * fw, y1 + 0.45 * fh)
-                sim_phone = PhoneResult(t=t, phones=[(box, 0.9)])
-            hud.draw(frame, face, s, rate, sim_phone, cfg, t, note=note)
-            if sim:
-                cv2.putText(frame, "SIMULATED PHONE", (int(box[0]), max(20, int(box[1]) - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (80, 80, 255), 2, cv2.LINE_AA)
+            hud.draw(frame, face, s, rate, None, cfg, t, note=note)
             if writer is None:
                 writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), rate, frame.shape[1::-1])
             writer.write(frame)
@@ -288,9 +275,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        windows = [[starts[i] + lo - cuts[i][0], starts[i] + hi - cuts[i][0]]
-                   for i, sc in enumerate(scenarios) if "phone" in sc.get("simulate", {}) for lo, hi in [sc["simulate"]["phone"]]]
-        said = annotate(reel, tmp / "hud.mp4", Config.load(args.config), args.model, windows)
+        said = annotate(reel, tmp / "hud.mp4", Config.load(args.config), args.model)
         voices = synthesize({phrase for _, phrase in said}, tmp)
         placed = mix(tmp / "hud.mp4", reel, said, voices, showcase)
     print(f"showcase.mp4  {len(placed)} spoken alerts")
@@ -301,11 +286,6 @@ def main() -> None:
     ends = starts[1:] + [total]
     chapters = [{"label": sc["label"], "start": round(s, 2), "end": round(e, 2), "expect": sc.get("summary", "")}
                 for sc, s, e in zip(scenarios, starts, ends, strict=True)]
-    k = 0
-    for c, sc in zip(chapters, scenarios):
-        if "phone" in sc.get("simulate", {}):
-            c["simulate"] = {"phone": [round(x, 2) for x in windows[k]]}
-            k += 1
     (args.out / "chapters.json").write_text(
         "[\n" + ",\n".join("  " + json.dumps(c, ensure_ascii=False) for c in chapters) + "\n]\n", encoding="utf-8")
     print(f"wrote {args.out}: reel.mp4, showcase.mp4, poster.jpg, chapters.json")

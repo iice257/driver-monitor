@@ -46,17 +46,6 @@ def frames(path: Path, model: Path = DEFAULT_MODEL) -> list[Frame]:
     return out
 
 
-def simulate_phone(signal: list[Frame], windows: list[list[float]]) -> None:
-    """Smoke-demo injection: mark a phone held at the face inside each [from, to] window.
-
-    Used for scenarios with a "simulate": {"phone": [from, to]} entry, where there is no real
-    phone footage yet. It exercises the same state machine, alert and voice path a detection would.
-    """
-    for f in signal:
-        if f.face and any(lo <= f.t <= hi for lo, hi in windows):
-            f.phone, f.phone_near_face = True, True
-
-
 def run_state(cfg: Config, signal: list[Frame]) -> list[tuple[float, Level, list[str]]]:
     state = DriverState(cfg)
     out = []
@@ -111,10 +100,7 @@ def main() -> None:
     failed = 0
     neg_seconds, neg_alarms = 0.0, 0
     for sc in scenarios:
-        signal = frames(args.spec.parent / sc["clip"])
-        if "phone" in sc.get("simulate", {}):
-            simulate_phone(signal, [sc["simulate"]["phone"]])
-        tl = run_state(cfg, signal)
+        tl = timeline(args.spec.parent / sc["clip"], cfg)
         problems = check(sc, tl)
         failed += bool(problems)
         events = sorted({re.sub(r" [\d.]+s?%?$", "", r) for _, _, rs in tl for r in rs})
