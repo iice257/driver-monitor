@@ -116,7 +116,7 @@ function speak(cue, urgent) {
   speechSynthesis.speak(u);
 }
 
-// Closed eyes for 2 s after the first phrase: a loud two-tone alarm that speeds up until they open.
+// The eyes-closed alert sounds a loud two-tone alarm that speeds up until the eyes have been open for 2 s.
 let ac = null, sirenTimer = 0, sirenGain = null;
 function siren(hz) {
   if (!alarmOn || hz <= 0) {

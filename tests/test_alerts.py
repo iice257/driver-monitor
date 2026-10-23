@@ -111,29 +111,38 @@ def test_alert_cues_preempt_and_warn_cues_do_not():
     assert first.cue.key == "yawn" and not first.preempt
 
 
-def test_closed_eyes_escalate_to_a_faster_siren_after_two_seconds():
+def test_siren_starts_with_the_eyes_closed_alert_and_speeds_up():
     from driver_monitor.alerts import AlarmPolicy
 
     p = AlarmPolicy()
     events = run(p, 9.0, ["Eyes closed 1.0s"], urgent=True)
-    phrases = [(t, d) for t, d in events if d.cue]
-    sirens = [(t, d.siren_hz) for t, d in events if d.siren_hz]
-    assert [t for t, _ in phrases] == [0.0] and phrases[0][1].preempt  # one phrase, then the siren
-    assert 1.9 <= sirens[0][0] <= 2.1
-    assert sirens[0][1] == 2.0 and sirens[-1][1] > sirens[0][1]
-    assert sirens[-1][1] <= p.siren_max_hz
+    assert not [d for _, d in events if d.cue]  # no phrase: the siren is the alert
+    sirens = [(t, d.siren_hz) for t, d in events]
+    assert sirens[0] == (0.0, 2.0) and all(d.preempt for _, d in events)
+    assert sirens[-1][1] > sirens[0][1] and sirens[-1][1] <= p.siren_max_hz
     rates = [hz for _, hz in sirens]
-    assert rates == sorted(rates)  # never slows down while the eyes stay shut
+    assert rates == sorted(rates)
 
 
-def test_siren_stops_when_eyes_open_and_restarts_from_the_bottom():
+def test_siren_keeps_going_until_two_seconds_after_the_eyes_open():
     from driver_monitor.alerts import AlarmPolicy
 
     p = AlarmPolicy()
     run(p, 5.0, ["Eyes closed 1.0s"], urgent=True)
-    assert p.update([], 5.1, False).siren_hz == 0
-    again = run(p, 3.0, ["Eyes closed 1.0s"], urgent=True, start=6.0)
-    assert [d.siren_hz for _, d in again if d.siren_hz][0] == 2.0
+    assert p.update([], 5.5, False).siren_hz > 0     # awake, but still inside the hold
+    assert p.update([], 6.9, False).siren_hz > 0
+    assert p.update([], 7.2, False).siren_hz == 0    # 2 s after the last closed frame (t=4.97)
+    again = run(p, 1.0, ["Eyes closed 1.0s"], urgent=True, start=8.0)
+    assert [d.siren_hz for _, d in again][0] == 2.0  # a new episode restarts from the bottom
+
+
+def test_eyes_shutting_again_inside_the_hold_continue_the_same_alarm():
+    from driver_monitor.alerts import AlarmPolicy
+
+    p = AlarmPolicy()
+    run(p, 4.0, ["Eyes closed 1.0s"], urgent=True)
+    p.update([], 4.5, False)
+    assert p.update(["Eyes closed 1.0s"], 5.0, True).siren_hz > 2.0
 
 
 def test_phone_watcher_reports_a_failing_backend_instead_of_dying(monkeypatch):

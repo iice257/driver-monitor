@@ -88,28 +88,31 @@ class Decision:
 
 @dataclass
 class AlarmPolicy:
-    """VoicePolicy plus the safety rules: ALERT cues pre-empt, closed eyes escalate to a siren.
+    """VoicePolicy plus the safety rules: ALERT cues pre-empt, closed eyes sound a siren.
 
-    The voice stays for WARN-level cues. If the eyes are still closed `siren_after_s` after the
-    first phrase, the voice stops and a loud two-tone alarm takes over, getting faster
-    (`siren_start_hz` to `siren_max_hz`, +`siren_ramp_hz` per second) until the eyes open.
+    The moment the "Eyes closed" alert starts, the voice stops and a loud two-tone alarm takes
+    over. It keeps going, getting faster (`siren_start_hz` to `siren_max_hz`, +`siren_ramp_hz`
+    per second), until the eyes have stayed open for `siren_hold_s`. Eyes that flutter shut again
+    inside that window continue the same alarm instead of restarting it.
     """
 
-    siren_after_s: float = 2.0
     siren_start_hz: float = 2.0
     siren_max_hz: float = 6.0
     siren_ramp_hz: float = 0.5
+    siren_hold_s: float = 2.0
     voice: VoicePolicy = field(default_factory=VoicePolicy)
-    _eyes_since: float | None = None
+    _episode: float | None = None      # when the current alarm started
+    _last_closed: float = 0.0          # last time the eyes-closed alert was showing
 
     def update(self, reasons: list[str], t: float, urgent: bool, yawns: int | None = None) -> Decision:
-        eyes = any(r.startswith("Eyes closed") for r in reasons)
-        if not eyes:
-            self._eyes_since = None
-        elif self._eyes_since is None:
-            self._eyes_since = t
-        if self._eyes_since is not None and t - self._eyes_since >= self.siren_after_s:
-            hz = min(self.siren_max_hz, self.siren_start_hz + self.siren_ramp_hz * (t - self._eyes_since - self.siren_after_s))
+        if any(r.startswith("Eyes closed") for r in reasons):
+            self._last_closed = t
+            if self._episode is None:
+                self._episode = t
+        elif self._episode is not None and t - self._last_closed >= self.siren_hold_s:
+            self._episode = None
+        if self._episode is not None:
+            hz = min(self.siren_max_hz, self.siren_start_hz + self.siren_ramp_hz * (t - self._episode))
             self.voice.update([r for r in reasons if not r.startswith("Eyes closed")], t, yawns)
             return Decision(siren_hz=hz, preempt=True)
         cue = self.voice.update(reasons, t, yawns)
@@ -119,4 +122,5 @@ class AlarmPolicy:
 
     def reset(self) -> None:
         self.voice.reset()
-        self._eyes_since = None
+        self._episode = None
+        self._last_closed = 0.0
