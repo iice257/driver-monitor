@@ -183,7 +183,8 @@ def annotate(reel: Path, out: Path, cfg: Config, model: Path, phone_windows: lis
                 sim_phone = PhoneResult(t=t, phones=[(box, 0.9)])
             hud.draw(frame, face, s, rate, sim_phone, cfg, t, note=note)
             if sim:
-                cv2.putText(frame, "SIMULATED PHONE", (int(box[0]), max(20, int(box[1]) - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (80, 80, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, "SIMULATED PHONE", (int(box[0]), max(20, int(box[1]) - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (80, 80, 255), 2, cv2.LINE_AA)
             if writer is None:
                 writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), rate, frame.shape[1::-1])
             writer.write(frame)
