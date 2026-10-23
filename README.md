@@ -8,7 +8,7 @@ It tracks 478 facial landmarks and 52 facial blendshapes per frame, detects phon
 
 | Condition | Signal | Rule (defaults) | Level |
 |---|---|---|---|
-| Microsleep | EAR + eyeBlink blendshape | Eyes closed ≥ 1.2 s | **ALERT** + alarm |
+| Microsleep | EAR + eyeBlink blendshape | Eyes closed ≥ 1.2 s | **ALERT** + siren from the first alert until 2 s after the eyes open |
 | Phone in use | Phone detector (EfficientDet / YOLO) | Phone near the face ≥ 1 s, or in view while looking down ≥ 1 s | **ALERT** + alarm |
 | Phone call | Hand landmarks | Hand held at the ear ≥ 2 s | **ALERT** + alarm |
 | Eyes off road | Head pose + iris gaze | Head turned > 25°, down > 15°, or eyes turned for ≥ 2 s | **ALERT** + alarm |
@@ -82,7 +82,7 @@ The HUD shows each live signal with its threshold marker. Watch where your value
 
 ## Test reel
 
-`samples/` holds five AI-generated scenarios: two normal-driving clips that must stay quiet (calm driving, talking and singing) and three that must alert (repeated yawning, microsleep, looking away). All were made with Veo in Gemini from one reference image, [`samples/driver_reference.jpg`](samples/driver_reference.jpg), used as the opening frame, so the same driver appears in every clip. Generate new scenarios from that image to keep the reel consistent.
+`samples/` holds six AI-generated scenarios: three normal-driving clips that must stay quiet (calm driving, talking and singing, a mirror and shoulder check) and three that must alert (repeated yawning, microsleep, looking away). All were made with Veo in Gemini from one reference image, [`samples/driver_reference.jpg`](samples/driver_reference.jpg), used as the opening frame, so the same driver appears in every clip. Generate new scenarios from that image to keep the reel consistent.
 
 ```bash
 python -m driver_monitor.evaluate samples/scenarios.json         # each clip raises what it should, and nothing it shouldn't

@@ -5,7 +5,14 @@
     "negative": true,
     "min_end": 6.0,
     "summary": "Eyes on the road, normal blinks: the monitor calibrates on this and stays quiet",
-    "forbid": ["Eyes closed", "Eyes off road", "Yawn", "Fatigue", "Phone", "Driver not visible"]
+    "forbid": [
+      "Eyes closed",
+      "Eyes off road",
+      "Yawn",
+      "Fatigue",
+      "Phone",
+      "Driver not visible"
+    ]
   },
   {
     "label": "Talking and singing",
@@ -13,30 +20,87 @@
     "negative": true,
     "min_end": 8.0,
     "summary": "Chatting and singing along, eyes on the road: no yawn, no alert",
-    "forbid": ["Eyes closed", "Eyes off road", "Yawn", "Fatigue", "Phone", "Driver not visible"]
+    "forbid": [
+      "Eyes closed",
+      "Eyes off road",
+      "Yawn",
+      "Fatigue",
+      "Phone",
+      "Driver not visible"
+    ]
+  },
+  {
+    "label": "Mirror and shoulder check",
+    "clip": "mirror.mp4",
+    "negative": true,
+    "min_end": 8.0,
+    "summary": "A quick mirror and shoulder check under 2 s: a normal driving habit, not an alert",
+    "forbid": [
+      "Eyes closed",
+      "Yawn",
+      "Fatigue",
+      "Phone",
+      "Eyes off road"
+    ]
   },
   {
     "label": "Repeated yawning",
     "clip": "yawn.mp4",
     "min_end": 9.0,
     "summary": "Each yawn is noted, the squint isn't a microsleep. Three yawns flag fatigue (the demo compresses the usual 5-minute window)",
-    "expect": [{"reason": "Yawn"}, {"reason": "Fatigue: 3 yawns"}],
-    "forbid": ["Eyes closed", "Eyes off road", "Phone", "Fatigue: PERCLOS"]
+    "expect": [
+      {
+        "reason": "Yawn"
+      },
+      {
+        "reason": "Fatigue: 3 yawns"
+      }
+    ],
+    "forbid": [
+      "Eyes closed",
+      "Eyes off road",
+      "Phone",
+      "Fatigue: PERCLOS"
+    ]
   },
   {
     "label": "Microsleep",
     "clip": "drowsy.mp4",
     "min_end": 8.0,
     "summary": "Eyes stay shut while the head droops: 'Eyes closed' alert after 1.2 s",
-    "expect": [{"reason": "Eyes closed", "within": [3.5, 8.0]}],
-    "forbid": ["Phone", "Fatigue: PERCLOS"]
+    "expect": [
+      {
+        "reason": "Eyes closed",
+        "within": [
+          3.5,
+          8.0
+        ]
+      }
+    ],
+    "forbid": [
+      "Phone",
+      "Fatigue: PERCLOS"
+    ]
   },
   {
     "label": "Looking away",
     "clip": "lookaway.mp4",
     "min_end": 8.5,
     "summary": "Head turns to the side window for more than 2 s: 'Eyes off the road' alert, cleared on return",
-    "expect": [{"reason": "Eyes off road", "within": [4.0, 9.0]}],
-    "forbid": ["Eyes closed", "Yawn", "Phone", "Fatigue"]
+    "expect": [
+      {
+        "reason": "Eyes off road",
+        "within": [
+          4.0,
+          9.0
+        ]
+      }
+    ],
+    "forbid": [
+      "Eyes closed",
+      "Yawn",
+      "Phone",
+      "Fatigue"
+    ]
   }
 ]
