@@ -17,7 +17,7 @@ const ASSETS = {
   objects: { url: `${MODEL_DIR}/efficientdet_lite0.tflite`, bytes: 7254339, label: "Phone model" },
   hands: { url: `${MODEL_DIR}/hand_landmarker.task`, bytes: 7819105, label: "Hand model" },
 };
-const GPU_TIMEOUT_MS = 5000;
+const GPU_TIMEOUT_MS = 3000;
 
 let FaceLandmarker, FilesetResolver, HandLandmarker, ObjectDetector;
 let face = null, objects = null, hands = null;
@@ -90,9 +90,10 @@ async function init(which) {
   role = which;
   const keys = ["bundle", simd() ? "wasmSimd" : "wasmPlain", ...(role === "face" ? ["face"] : ["objects", "hands"])];
   postMessage({ type: "plan", role, assets: keys.map((k) => ({ key: k, label: ASSETS[k].label, bytes: ASSETS[k].bytes })) });
+  const modelP = role === "face" ? fetchBytes("face") : null; // downloads alongside the runtime, not after it
   const fileset = await loadRuntime();
   if (role === "face") {
-    const model = await fetchBytes("face");
+    const model = await modelP;
     face = await create(
       (delegate) => FaceLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetBuffer: model, delegate },

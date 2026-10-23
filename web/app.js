@@ -233,6 +233,7 @@ function showLoad() {
   }
   if (!total) return;
   const pct = Math.min(100, Math.round((loaded / total) * 100));
+  if (!ready) { $("status-label").textContent = "Starting detection"; $("status-sub").textContent = `Loading models, ${pct}%`; }
   $("veil-progress").hidden = false;
   $("veil-fill").style.width = `${pct}%`;
   $("veil-bar").setAttribute("aria-valuenow", String(pct));
@@ -258,13 +259,15 @@ function loadModels() {
     worker.onerror = (e) => done(reject, new Error(e.message || "worker failed"));
     worker.onmessage = (e) => {
       const d = e.data;
-      if (d.type === "ready") { engineDelegate = d.delegate; done(resolve); }
+      if (d.type === "ready") { engineDelegate = d.delegate; done(resolve); phoneStarter?.(); }
       else if (d.type === "error") done(reject, new Error(d.message));
       else if (d.type === "result") onResult(d);
       else { arm(); onProgress(d); }
     };
     worker.postMessage({ type: "init", role: "face" });
     // Phone evidence is optional and loads in its own worker: the face pipeline starts without it.
+    // It starts once the face pipeline is ready, so its 15 MB never competes with the first load.
+    const startPhone = () => {
     phoneWorker = new Worker("/worker.js");
     phoneWorker.onerror = (e) => phoneOff(e.message || "worker failed");
     phoneWorker.onmessage = (e) => {
@@ -274,9 +277,11 @@ function loadModels() {
       else if (d.type === "result") onPhone(d);
     };
     phoneWorker.postMessage({ type: "init", role: "phone" });
+    };
+    phoneStarter = startPhone;
   });
 }
-let engineDelegate = "GPU";
+let engineDelegate = "GPU", phoneStarter = null;
 
 // Phone evidence is a bonus: if its models fail, say so (HUD and log) instead of silently reading "No".
 let phoneBroken = false;
@@ -326,7 +331,7 @@ async function startDemo() {
 }
 
 async function playDemo() {
-  veil();
+  veil(); // the reel plays at once; detection joins in when the models land
   video.muted = !soundOn; // a click got us here, so sound is allowed
   try {
     await video.play();
@@ -817,19 +822,27 @@ buildPanel();
 setSound(soundOn);
 setAlarm(alarmOn);
 function boot() {
-  veil({ text: "Loading models", busy: true });
   return Promise.all([loadModels(), loadChapters(), loadVoice()]);
 }
 function start() {
+  // The page is usable at once: the poster and Play button show while the models download.
+  const wanted = new URLSearchParams(location.search).get("mode");
+  if (!mode || mode === "demo") {
+    if (wanted === "camera") document.querySelector('[data-mode="camera"]').click();
+    else startDemo();
+  }
   boot()
   .then(() => {
     ready = true;
-    const wanted = new URLSearchParams(location.search).get("mode");
-    if (wanted === "camera") document.querySelector('[data-mode="camera"]').click();
-    else startDemo();
     if (!running) {
       running = true;
       requestAnimationFrame(tick);
+    }
+    if (mode === "demo" && !video.paused && video.currentTime > 0.3) {
+      // The reel started before the models were ready: rewind so calibration sees the calm opener.
+      video.currentTime = 0;
+      resetState();
+      chapterIdx = -1;
     }
   })
   .catch((err) => {
