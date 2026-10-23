@@ -44,6 +44,28 @@
     ]
   },
   {
+    "label": "Phone use (simulated)",
+    "clip": "opener.mp4",
+    "min_end": 6.0,
+    "simulate": {
+      "phone": [
+        2.0,
+        5.5
+      ]
+    },
+    "summary": "Simulated: a phone held at the face is injected into the footage until real phone-use clips are shot. 'Phone in use' alert after 1 s",
+    "expect": [
+      {
+        "reason": "Phone in use"
+      }
+    ],
+    "forbid": [
+      "Eyes closed",
+      "Yawn",
+      "Fatigue"
+    ]
+  },
+  {
     "label": "Repeated yawning",
     "clip": "yawn.mp4",
     "min_end": 9.0,

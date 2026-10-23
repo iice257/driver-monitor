@@ -521,6 +521,13 @@ function onResult(d) {
       f.handAtEar = phone.hands.some((hd) => handAtEar(hd, reading.box));
     }
   }
+  // Smoke demo: chapters marked "simulate" inject a phone at the face, drawn and labelled as simulated.
+  let shown = fresh ? phone : null;
+  if (reading && mode === "demo" && chapters.some((c) => c.simulate?.phone && t >= c.simulate.phone[0] && t <= c.simulate.phone[1])) {
+    const [x0, y0, x1, y1] = reading.box, fw = x1 - x0, fh = y1 - y0;
+    f.phone = f.phoneNearFace = true;
+    shown = { t, hands: [], phones: [{ box: [x1 - 0.05 * fw, y0 + 0.5 * fh, x1 + 0.5 * fw, y1 + 0.45 * fh], score: 0.9, simulated: true }] };
+  }
   const s = state.update(f);
 
   const done = performance.now();
@@ -530,7 +537,7 @@ function onResult(d) {
   // On a slow device the reel would outrun the models; slow it down instead of skipping evidence.
   if (mode === "demo" && fps) video.playbackRate = Math.max(0.35, Math.min(1, fps / 22));
 
-  draw(reading, s, fresh ? phone : null);
+  draw(reading, s, shown);
   const p3 = performance.now();
   logState(s, t);
   const alarm = voice.update(s.reasons, t, s.level === Level.ALERT, s.yawns); // live during calibration too
@@ -538,7 +545,7 @@ function onResult(d) {
   siren(alarm.sirenHz);
   if (done - lastUi > 66) {
     lastUi = done;
-    renderPanel(reading, s, fresh ? phone : null);
+    renderPanel(reading, s, shown);
   }
   if (PERF) {
     const p4 = performance.now();
@@ -585,6 +592,11 @@ function draw(r, s, ph) {
     for (const p of ph.phones) {
       ctx.strokeStyle = COLORS.alert;
       ctx.strokeRect(p.box[0], p.box[1], p.box[2] - p.box[0], p.box[3] - p.box[1]);
+      if (p.simulated) {
+        ctx.fillStyle = COLORS.alert;
+        ctx.font = `600 ${Math.round(13 * u)}px Inter, sans-serif`;
+        ctx.fillText("SIMULATED PHONE", p.box[0], Math.max(14 * u, p.box[1] - 6 * u));
+      }
     }
     ctx.strokeStyle = "rgba(120,190,255,0.8)";
     ctx.lineWidth = 1.5 * u;
