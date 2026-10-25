@@ -44,6 +44,22 @@
     ]
   },
   {
+    "label": "Phone use",
+    "clip": "phone.mp4",
+    "min_end": 8.0,
+    "summary": "Picks a phone up from his lap, looks at it, raises it to his face: 'Phone in use' alert",
+    "expect": [
+      {
+        "reason": "Phone in use"
+      }
+    ],
+    "forbid": [
+      "Eyes closed",
+      "Yawn",
+      "Fatigue"
+    ]
+  },
+  {
     "label": "Repeated yawning",
     "clip": "yawn.mp4",
     "min_end": 9.0,

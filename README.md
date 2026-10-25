@@ -82,7 +82,7 @@ The HUD shows each live signal with its threshold marker. Watch where your value
 
 ## Test reel
 
-`samples/` holds six AI-generated scenarios: three normal-driving clips that must stay quiet (calm driving, talking and singing, a mirror and shoulder check) and three that must alert (repeated yawning, microsleep, looking away). All were made with Veo in Gemini from one reference image, [`samples/driver_reference.jpg`](samples/driver_reference.jpg), used as the opening frame, so the same driver appears in every clip. Generate new scenarios from that image to keep the reel consistent.
+`samples/` holds seven AI-generated scenarios: three normal-driving clips that must stay quiet (calm driving, talking and singing, a mirror and shoulder check) and four that must alert (phone use, repeated yawning, microsleep, looking away). The real phone and hand detectors run on every clip, in `evaluate` and in the reel, and looking down at a phone is not mistaken for closed eyes. All were made with Veo in Gemini from one reference image, [`samples/driver_reference.jpg`](samples/driver_reference.jpg), used as the opening frame, so the same driver appears in every clip. Generate new scenarios from that image to keep the reel consistent.
 
 ```bash
 python -m driver_monitor.evaluate samples/scenarios.json         # each clip raises what it should, and nothing it shouldn't

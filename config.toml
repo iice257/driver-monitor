@@ -17,6 +17,7 @@ calib_pose_deg = 15.0       # head near frontal
 ear_ratio = 0.72            # eyes "closed" below this fraction of your open-eye EAR
 ear_floor = 0.14
 blink_score = 0.65          # MediaPipe eyeBlink blendshape, 0..1
+ear_sure_ratio = 0.5        # with blendshapes, EAR alone counts only below threshold x this (looking down lowers lids, not shut)
 microsleep_s = 1.2          # closed this long -> ALERT
 perclos_window_s = 60.0
 perclos_warn = 0.15         # closed >15% of the window -> fatigue WARN

@@ -54,6 +54,19 @@ def test_blink_blendshape_alone_counts_as_closed():
     assert s.eyes_closed and s.level == Level.ALERT
 
 
+def test_lowered_lids_while_looking_down_are_not_closed_eyes():
+    # Reading a phone droops the lids (EAR falls below the threshold) but the blink blendshape stays low.
+    st, t = calibrated()
+    s, t = run(st, 3.0, t, ear=0.17, blink=0.38, pitch=-8.0)
+    assert not s.eyes_closed and "Eyes closed" not in " ".join(s.reasons)
+
+
+def test_without_blendshapes_ear_below_threshold_is_still_closed():
+    st, t = calibrated()
+    s, t = run(st, 1.5, t, ear=0.17, blink=None)
+    assert s.eyes_closed and s.level == Level.ALERT
+
+
 def test_looking_away_alerts_after_delay():
     st, t = calibrated()
     s, t = run(st, 1.0, t, yaw=40)

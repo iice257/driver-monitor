@@ -46,6 +46,7 @@ class Config:
     ear_ratio: float = 0.72          # closed when EAR < baseline * ratio
     ear_floor: float = 0.14
     blink_score: float = 0.65        # or when the eyeBlink blendshape exceeds this
+    ear_sure_ratio: float = 0.5      # with blendshapes, EAR alone must fall below threshold * this (lowered lids != shut)
     microsleep_s: float = 1.2
     perclos_window_s: float = 60.0
     perclos_warn: float = 0.15
@@ -279,8 +280,12 @@ class DriverState:
         blink_closed = f.blink is not None and f.blink > cfg.blink_score
         if abs(f.yaw) > cfg.eye_pose_yaw_deg or f.pitch < -cfg.eye_pose_pitch_deg:
             shut = blink_closed
+        elif f.blink is None:
+            shut = f.ear < thr
         else:
-            shut = f.ear < thr or blink_closed
+            # Looking down at a phone or dashboard droops the lids and drops EAR with the eyes still open;
+            # the blink blendshape stays low there. So EAR alone has to be far below the threshold.
+            shut = blink_closed or f.ear < thr * cfg.ear_sure_ratio
         closed = f.face and not squint and shut
         closed_for = self._closed.update(closed, f.t)
         perclos = self._perclos(f.t, closed)

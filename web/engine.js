@@ -14,6 +14,7 @@ export const DEFAULTS = {
   ear_ratio: 0.72,
   ear_floor: 0.14,
   blink_score: 0.65,
+  ear_sure_ratio: 0.5,
   microsleep_s: 1.2,
   perclos_window_s: 60.0,
   perclos_warn: 0.15,
@@ -303,7 +304,10 @@ export class DriverState {
     // With the head turned or tipped far from the camera EAR is unreliable: blink blendshape only.
     const thr = this.threshold();
     const blinkClosed = f.blink != null && f.blink > c.blink_score;
-    const shut = Math.abs(f.yaw) > c.eye_pose_yaw_deg || f.pitch < -c.eye_pose_pitch_deg ? blinkClosed : f.ear < thr || blinkClosed;
+    let shut;
+    if (Math.abs(f.yaw) > c.eye_pose_yaw_deg || f.pitch < -c.eye_pose_pitch_deg) shut = blinkClosed;
+    else if (f.blink == null) shut = f.ear < thr;
+    else shut = blinkClosed || f.ear < thr * c.ear_sure_ratio;
     const closed = f.face && !squint && shut;
     const closedFor = this.closed.update(closed, f.t);
     const perclos = this.perclos(f.t, closed);
