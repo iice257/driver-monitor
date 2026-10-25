@@ -33,7 +33,7 @@ button { font: inherit; color: inherit; }
 }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; text-decoration: none; }
 .brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.16); }
-.bar-links a { color: var(--fg-2); text-decoration: none; font-size: 14px; transition: color 0.2s; }
+.bar-links a { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); text-decoration: none; font-size: 14px; transition: color 0.2s; }
 .bar-links a:hover { color: var(--fg); }
 
 .shell { max-width: 1280px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) clamp(16px, 4vw, 40px) 64px; }

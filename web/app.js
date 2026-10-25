@@ -234,6 +234,7 @@ function showLoad() {
   if (!total) return;
   const pct = Math.min(100, Math.round((loaded / total) * 100));
   if (!ready) { $("status-label").textContent = "Starting detection"; $("status-sub").textContent = `Loading models, ${pct}%`; }
+  if (mode !== "demo") return; // camera mode: the model download is silent
   $("veil-progress").hidden = false;
   $("veil-fill").style.width = `${pct}%`;
   $("veil-bar").setAttribute("aria-valuenow", String(pct));
@@ -341,6 +342,7 @@ async function playDemo() {
 }
 
 async function startCamera() {
+  $("veil-progress").hidden = true;
   mode = "camera";
   video.pause();
   video.muted = true;
