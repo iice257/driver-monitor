@@ -32,5 +32,18 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "driver-monitor-demo.vercel.app"
+        }
+      ],
+      "destination": "https://kingsleyaremu.com/driver-monitor",
+      "permanent": false
+    }
   ]
 }
